@@ -1,15 +1,17 @@
 // == TavernHelper Script ==
 // name: 分支页面暂存器
 // author: Codex
-// version: v0.26
+// version: v0.28
 // description: 将未读分支页面原文保存到指定世界书的关闭条目中，并在酒馆助手面板内按当前酒馆渲染规则预览。
 
 (function () {
   'use strict';
 
   const SCRIPT_NAME = '分支页面暂存器';
-  const SCRIPT_VERSION = 'v0.26';
+  const SCRIPT_VERSION = 'v0.28';
   const BUTTON_NAME = '分支暂存';
+  const GLOBAL_INSTANCE_KEY = '__th_branch_page_stash_instance_v1__';
+  const INSTANCE_ID = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
   const STORAGE_KEY = 'th_branch_page_stash_settings_v1';
   const STYLE_ID = 'th-branch-page-stash-style-v1';
   const WIDGET_ID = 'th-branch-stash-widget';
@@ -19,6 +21,10 @@
   const EXTRA_KEY = 'thBranchPageStash';
   let floatingButtonPosition = null;
   let minimizedButtonPosition = null;
+  let floatingGuardObserver = null;
+  let floatingGuardTimers = [];
+  let bootRetryTimer = null;
+  let stoppingInstance = false;
 
   const DEFAULT_SETTINGS = {
     worldbookName: '分支页面暂存库',
@@ -59,6 +65,72 @@
 
   function getHostDocument() {
     return getHostWindow().document || document;
+  }
+
+  function getOwnerFrameName() {
+    try {
+      return String(window && window.name || '').trim();
+    } catch (error) {
+      return '';
+    }
+  }
+
+  function clearFloatingButtonGuard() {
+    floatingGuardTimers.forEach((timer) => clearTimeout(timer));
+    floatingGuardTimers = [];
+    if (floatingGuardObserver) {
+      floatingGuardObserver.disconnect();
+      floatingGuardObserver = null;
+    }
+    if (bootRetryTimer) {
+      clearTimeout(bootRetryTimer);
+      bootRetryTimer = null;
+    }
+  }
+
+  function removeOwnedDom() {
+    const doc = getHostDocument();
+    [WIDGET_ID, STYLE_ID].forEach((id) => {
+      const node = doc.getElementById(id);
+      if (node) node.remove();
+    });
+    if (doc.body) {
+      if (doc.body.dataset.thBranchFloatingGuardVersion === SCRIPT_VERSION) {
+        delete doc.body.dataset.thBranchFloatingGuardVersion;
+      }
+      if (doc.body.dataset.thBranchFloatingGuard === 'true') {
+        delete doc.body.dataset.thBranchFloatingGuard;
+      }
+    }
+  }
+
+  function stopInstance() {
+    if (stoppingInstance) return;
+    stoppingInstance = true;
+    clearFloatingButtonGuard();
+    removeOwnedDom();
+    const host = getHostWindow();
+    if (host[GLOBAL_INSTANCE_KEY] && host[GLOBAL_INSTANCE_KEY].instanceId === INSTANCE_ID) {
+      delete host[GLOBAL_INSTANCE_KEY];
+    }
+  }
+
+  function claimGlobalInstance() {
+    const host = getHostWindow();
+    const previous = host[GLOBAL_INSTANCE_KEY];
+    if (previous && previous.instanceId !== INSTANCE_ID && typeof previous.stop === 'function') {
+      try {
+        previous.stop();
+      } catch (error) {
+        console.warn(`[${SCRIPT_NAME}] 清理旧浮窗实例失败`, error);
+      }
+    }
+    host[GLOBAL_INSTANCE_KEY] = {
+      instanceId: INSTANCE_ID,
+      version: SCRIPT_VERSION,
+      ownerFrameName: getOwnerFrameName(),
+      stop: stopInstance,
+    };
   }
 
   function get$() {
@@ -1283,13 +1355,32 @@
   function ensureWidgetContainer() {
     const doc = getHostDocument();
     let widget = doc.getElementById(WIDGET_ID);
+    if (widget && widget.dataset.thBranchStashVersion !== SCRIPT_VERSION && !hasActiveOverlay(widget)) {
+      widget.remove();
+      widget = null;
+    }
     if (!widget) {
       widget = doc.createElement('div');
       widget.id = WIDGET_ID;
       widget.dataset.panelOpen = 'false';
       doc.body.appendChild(widget);
     }
+    widget.dataset.thBranchStashVersion = SCRIPT_VERSION;
+    widget.dataset.thBranchStashInstance = INSTANCE_ID;
     return widget;
+  }
+
+  function hasActiveOverlay(widget) {
+    if (!widget) return false;
+    const overlay = widget.querySelector('.th-branch-overlay');
+    return Boolean(overlay && !overlay.classList.contains('th-branch-minimized'));
+  }
+
+  function syncWidgetOpenState(widget) {
+    if (!widget) return false;
+    const active = hasActiveOverlay(widget);
+    widget.dataset.panelOpen = active ? 'true' : 'false';
+    return active;
   }
 
   function getFloatingButtonStyle(theme) {
@@ -2173,6 +2264,7 @@
   function injectFallbackButton() {
     const doc = getHostDocument();
     const widget = ensureWidgetContainer();
+    const activeOverlay = syncWidgetOpenState(widget);
     removeMinimizedButton();
     let existing = doc.getElementById(FLOATING_BUTTON_ID);
     if (existing && existing.dataset.thBranchStashVersion !== SCRIPT_VERSION) {
@@ -2191,7 +2283,7 @@
       existing.dataset.thBranchStashVersion = SCRIPT_VERSION;
       existing.style.cssText = getFloatingButtonStyle(loadSettings().theme);
       applyFloatingButtonPosition(existing);
-      if (widget.dataset.panelOpen === 'true') existing.style.display = 'none';
+      existing.style.display = activeOverlay ? 'none' : '';
       bindFloatingButtonDrag(existing, () => openPanel().catch((error) => notify('error', error.message || String(error))));
       if (existing.parentNode !== widget) widget.appendChild(existing);
       return;
@@ -2205,46 +2297,71 @@
     button.dataset.thBranchStashVersion = SCRIPT_VERSION;
     button.style.cssText = getFloatingButtonStyle(loadSettings().theme);
     applyFloatingButtonPosition(button);
-    if (widget.dataset.panelOpen === 'true') button.style.display = 'none';
+    button.style.display = activeOverlay ? 'none' : '';
     bindFloatingButtonDrag(button, () => openPanel().catch((error) => notify('error', error.message || String(error))));
     widget.appendChild(button);
   }
 
   function installFloatingButtonGuard() {
     const doc = getHostDocument();
-    if (!doc || doc.body && doc.body.dataset.thBranchFloatingGuardVersion === SCRIPT_VERSION) return;
+    if (!doc || !doc.body) return;
+    if (floatingGuardObserver && doc.body.dataset.thBranchFloatingGuardVersion === SCRIPT_VERSION) return;
+    clearFloatingButtonGuard();
     if (doc.body) {
       doc.body.dataset.thBranchFloatingGuard = 'true';
       doc.body.dataset.thBranchFloatingGuardVersion = SCRIPT_VERSION;
     }
-    [250, 900, 1800, 3600].forEach((delay) => {
-      setTimeout(() => {
-        try {
+
+    const repairFloatingButton = () => {
+      try {
+        const widget = doc.getElementById(WIDGET_ID);
+        const button = doc.getElementById(FLOATING_BUTTON_ID);
+        const activeOverlay = syncWidgetOpenState(widget);
+        const buttonStale = button && button.dataset.thBranchStashVersion !== SCRIPT_VERSION;
+        const buttonHiddenWithoutPanel = button && !activeOverlay && button.style.display === 'none';
+        if (!button || buttonStale || buttonHiddenWithoutPanel) {
           injectFallbackButton();
+        }
+      } catch (error) {
+        console.warn(`[${SCRIPT_NAME}] 重建悬浮入口失败`, error);
+      }
+    };
+
+    [0, 250, 900, 1800, 3600, 5200, 8000, 12000].forEach((delay) => {
+      const timer = setTimeout(() => {
+        try {
+          repairFloatingButton();
         } catch (error) {
           console.warn(`[${SCRIPT_NAME}] 重建悬浮入口失败`, error);
         }
       }, delay);
+      floatingGuardTimers.push(timer);
     });
     try {
       const Observer = getHostWindow().MutationObserver || window.MutationObserver;
       if (!Observer || !doc.body) return;
       const observer = new Observer(() => {
-        if (!doc.getElementById(FLOATING_BUTTON_ID)) {
-          try {
-            injectFallbackButton();
-          } catch (error) {
-            console.warn(`[${SCRIPT_NAME}] 监听重建悬浮入口失败`, error);
-          }
-        }
+        repairFloatingButton();
       });
       observer.observe(doc.body, { childList: true, subtree: true });
+      floatingGuardObserver = observer;
     } catch (error) {
       console.warn(`[${SCRIPT_NAME}] 悬浮入口守护启动失败`, error);
     }
   }
 
   function register() {
+    claimGlobalInstance();
+    const hostDoc = getHostDocument();
+    if (!hostDoc.head || !hostDoc.body) {
+      if (!bootRetryTimer) {
+        bootRetryTimer = setTimeout(() => {
+          bootRetryTimer = null;
+          register();
+        }, 120);
+      }
+      return;
+    }
     injectStyle();
     try {
       const handler = () => openPanel().catch((error) => {
@@ -2272,8 +2389,12 @@
     }
   }
 
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', register);
+  window.addEventListener('pagehide', stopInstance, { once: true });
+  window.addEventListener('unload', stopInstance, { once: true });
+
+  const initialDocument = getHostDocument();
+  if (initialDocument.readyState === 'loading') {
+    initialDocument.addEventListener('DOMContentLoaded', register, { once: true });
   } else {
     register();
   }
