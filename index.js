@@ -1,14 +1,14 @@
 // == TavernHelper Script ==
 // name: 分支页面暂存器
 // author: Codex
-// version: v0.24
+// version: v0.25
 // description: 将未读分支页面原文保存到指定世界书的关闭条目中，并在酒馆助手面板内按当前酒馆渲染规则预览。
 
 (function () {
   'use strict';
 
   const SCRIPT_NAME = '分支页面暂存器';
-  const SCRIPT_VERSION = 'v0.24';
+  const SCRIPT_VERSION = 'v0.25';
   const BUTTON_NAME = '分支暂存';
   const STORAGE_KEY = 'th_branch_page_stash_settings_v1';
   const STYLE_ID = 'th-branch-page-stash-style-v1';
@@ -75,6 +75,37 @@
     }
     if (type === 'error') console.error(`[${SCRIPT_NAME}] ${message}`);
     else console.log(`[${SCRIPT_NAME}] ${message}`);
+  }
+
+  function getLoaderInfo() {
+    const host = getHostWindow();
+    return host.__TH_BRANCH_PAGE_STASH_LOADER__ || window.__TH_BRANCH_PAGE_STASH_LOADER__ || null;
+  }
+
+  function getVersionLabel() {
+    const loader = getLoaderInfo();
+    if (!loader) return SCRIPT_VERSION;
+    const sourceMap = {
+      latest: 'GitHub最新',
+      fallback: '固定回退',
+      pinned: '固定版本',
+    };
+    const source = sourceMap[loader.source] || 'GitHub入口';
+    const tag = loader.loadedTag || loader.tag || SCRIPT_VERSION;
+    return `${tag} · ${source}`;
+  }
+
+  function getVersionDetail() {
+    const loader = getLoaderInfo();
+    if (!loader) return `当前版本：${SCRIPT_VERSION}`;
+    const sourceMap = {
+      latest: '已从 GitHub 最新 Release 加载',
+      fallback: 'GitHub 最新版本查询失败，已加载备用版本',
+      pinned: '已加载固定版本',
+    };
+    const source = sourceMap[loader.source] || '已通过 GitHub 入口加载';
+    const tag = loader.loadedTag || loader.tag || SCRIPT_VERSION;
+    return `当前版本：${tag}；${source}`;
   }
 
   function helper(name) {
@@ -681,8 +712,17 @@
         font-weight: 800;
       }
       .th-branch-version {
+        display: inline-block;
         color: var(--th-branch-muted);
         font-size: 12px;
+        font-weight: 700;
+        margin-left: 4px;
+      }
+      .th-branch-update-line {
+        margin-top: 4px;
+        color: var(--th-branch-muted);
+        font-size: 12px;
+        line-height: 1.35;
       }
       .th-branch-theme-switch {
         display: flex;
@@ -1152,12 +1192,15 @@
     const worldbooks = getWorldbookNamesSafe();
     const theme = normalizeTheme(settings.theme);
     const options = worldbooks.map((name) => `<option value="${escapeAttr(name)}"${name === settings.worldbookName ? ' selected' : ''}>${escapeHtml(name)}</option>`).join('');
+    const versionLabel = getVersionLabel();
+    const versionDetail = getVersionDetail();
     return `
       <div class="th-branch-panel" data-mode="edit" data-theme="${escapeAttr(theme)}">
         <aside class="th-branch-sidebar">
           <header class="th-branch-head">
             <div>
-              <div class="th-branch-title">分支页面暂存器 <span class="th-branch-version">${SCRIPT_VERSION}</span></div>
+              <div class="th-branch-title">分支页面暂存器 <span class="th-branch-version">${escapeHtml(versionLabel)}</span></div>
+              <div class="th-branch-update-line">${escapeHtml(versionDetail)}</div>
               <div class="th-branch-theme-switch" aria-label="主题">
                 <button type="button" class="th-branch-theme-btn" data-action="theme" data-theme-value="dark" aria-pressed="${theme === 'dark' ? 'true' : 'false'}">黑</button>
                 <button type="button" class="th-branch-theme-btn" data-action="theme" data-theme-value="light" aria-pressed="${theme === 'light' ? 'true' : 'false'}">白</button>
