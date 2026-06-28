@@ -1,36 +1,37 @@
 (async () => {
-  const repo = 'YOUR_GITHUB_USERNAME/branch-page-stash';
-  const fallbackTag = 'v0.25';
+  const REPO = 'YOUR_GITHUB_USERNAME/branch-page-stash';
+  const VERSION = 'v0.26';
+  const URL = `https://gcore.jsdelivr.net/gh/${REPO}@${VERSION}/index.js`;
+
   const loaderState = {
-    repo,
-    fallbackTag,
+    repo: REPO,
+    loadedTag: VERSION,
+    source: 'manual',
+    url: URL,
     requestedAt: new Date().toISOString(),
   };
   window.__TH_BRANCH_PAGE_STASH_LOADER__ = loaderState;
 
-  async function load(tag, source) {
-    const url = `https://gcore.jsdelivr.net/gh/${repo}@${tag}/index.js`;
-    Object.assign(loaderState, {
-      loadedTag: tag,
-      source,
-      url,
-      loadedAt: new Date().toISOString(),
-    });
-    await import(url);
-    console.info(`[branch-page-stash] Loaded ${tag} from ${source}.`);
+  function popup(type, message) {
+    const toastr = window.toastr || window.parent && window.parent.toastr;
+    if (toastr && typeof toastr[type] === 'function') {
+      toastr[type](message);
+      return;
+    }
+    if (type === 'error') {
+      alert(message);
+      return;
+    }
+    console.log(`[branch-page-stash] ${message}`);
   }
 
   try {
-    const response = await fetch(`https://api.github.com/repos/${repo}/releases/latest`, {
-      cache: 'no-store',
-    });
-    if (!response.ok) throw new Error(`GitHub latest release ${response.status}`);
-    const release = await response.json();
-    const tag = release && release.tag_name ? release.tag_name : fallbackTag;
-    await load(tag, 'latest');
+    await import(URL);
+    loaderState.loadedAt = new Date().toISOString();
+    popup('success', `分支页面暂存器已加载 ${VERSION}`);
   } catch (error) {
     loaderState.error = String(error && error.message || error);
-    console.warn('[branch-page-stash] Falling back to pinned version.', error);
-    await load(fallbackTag, 'fallback');
+    console.error('[branch-page-stash] Load failed.', error);
+    popup('error', `分支页面暂存器 ${VERSION} 加载失败。请确认 GitHub 已发布这个版本。`);
   }
 })();
