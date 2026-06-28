@@ -1,14 +1,14 @@
 // == TavernHelper Script ==
 // name: 分支页面暂存器
 // author: Codex
-// version: v0.30
+// version: v0.31
 // description: 将未读分支页面原文保存到指定世界书的关闭条目中，并在酒馆助手面板内按当前酒馆渲染规则预览。
 
 (function () {
   'use strict';
 
   const SCRIPT_NAME = '分支页面暂存器';
-  const SCRIPT_VERSION = 'v0.30';
+  const SCRIPT_VERSION = 'v0.31';
   const BUTTON_NAME = '分支暂存';
   const GLOBAL_INSTANCE_KEY = '__th_branch_page_stash_instance_v1__';
   const INSTANCE_ID = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
@@ -23,6 +23,7 @@
   let minimizedButtonPosition = null;
   let floatingGuardObserver = null;
   let floatingGuardTimers = [];
+  let floatingRepairTimer = null;
   let bootRetryTimer = null;
   let stoppingInstance = false;
 
@@ -78,6 +79,10 @@
   function clearFloatingButtonGuard() {
     floatingGuardTimers.forEach((timer) => clearTimeout(timer));
     floatingGuardTimers = [];
+    if (floatingRepairTimer) {
+      clearTimeout(floatingRepairTimer);
+      floatingRepairTimer = null;
+    }
     if (floatingGuardObserver) {
       floatingGuardObserver.disconnect();
       floatingGuardObserver = null;
@@ -2347,7 +2352,7 @@
       doc.body.dataset.thBranchFloatingGuardVersion = SCRIPT_VERSION;
     }
 
-    const repairFloatingButton = () => {
+    const repairFloatingButton = (deep = false) => {
       try {
         const widget = doc.getElementById(WIDGET_ID);
         const button = doc.getElementById(FLOATING_BUTTON_ID);
@@ -2356,7 +2361,7 @@
         const buttonHiddenWithoutPanel = button && !activeOverlay && button.style.display === 'none';
         let buttonInvisible = false;
         let buttonOutside = false;
-        if (button && !activeOverlay) {
+        if (deep && button && !activeOverlay) {
           const style = getHostWindow().getComputedStyle ? getHostWindow().getComputedStyle(button) : null;
           buttonInvisible = !!style && (style.display === 'none' || style.visibility === 'hidden' || Number(style.opacity) === 0);
           const rect = button.getBoundingClientRect();
@@ -2372,10 +2377,18 @@
       }
     };
 
-    [0, 250, 900, 1800, 3600, 5200, 8000, 12000].forEach((delay) => {
+    const scheduleLightRepair = () => {
+      if (floatingRepairTimer) return;
+      floatingRepairTimer = setTimeout(() => {
+        floatingRepairTimer = null;
+        repairFloatingButton(false);
+      }, 360);
+    };
+
+    [900, 2200, 5200, 9000, 15000].forEach((delay) => {
       const timer = setTimeout(() => {
         try {
-          repairFloatingButton();
+          repairFloatingButton(true);
         } catch (error) {
           console.warn(`[${SCRIPT_NAME}] 重建悬浮入口失败`, error);
         }
@@ -2386,7 +2399,7 @@
       const Observer = getHostWindow().MutationObserver || window.MutationObserver;
       if (!Observer || !doc.body) return;
       const observer = new Observer(() => {
-        repairFloatingButton();
+        scheduleLightRepair();
       });
       observer.observe(doc.body, { childList: true, subtree: true });
       floatingGuardObserver = observer;
