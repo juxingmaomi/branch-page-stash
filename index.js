@@ -1,14 +1,14 @@
 // == TavernHelper Script ==
 // name: 分支页面暂存器
 // author: Codex
-// version: v0.33
+// version: v0.34
 // description: 将未读分支页面原文保存到指定世界书的关闭条目中，并在酒馆助手面板内按当前酒馆渲染规则预览。
 
 (function () {
   'use strict';
 
   const SCRIPT_NAME = '分支页面暂存器';
-  const SCRIPT_VERSION = 'v0.33';
+  const SCRIPT_VERSION = 'v0.34';
   const BUTTON_NAME = '分支暂存';
   const GLOBAL_INSTANCE_KEY = '__th_branch_page_stash_instance_v1__';
   const INSTANCE_ID = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
@@ -2317,7 +2317,7 @@
     }
     if (existing) {
       existing.type = 'button';
-      existing.textContent = '暂';
+      existing.textContent = '🐱';
       existing.title = '打开分支页面暂存器';
       existing.setAttribute('aria-label', '打开分支页面暂存器');
       existing.dataset.thBranchStashVersion = SCRIPT_VERSION;
@@ -2332,7 +2332,7 @@
     const button = doc.createElement('button');
     button.id = FLOATING_BUTTON_ID;
     button.type = 'button';
-    button.textContent = '暂';
+    button.textContent = '🐱';
     button.title = '打开分支页面暂存器';
     button.setAttribute('aria-label', '打开分支页面暂存器');
     button.dataset.thBranchStashVersion = SCRIPT_VERSION;
