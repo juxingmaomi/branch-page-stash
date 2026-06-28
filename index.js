@@ -1,14 +1,14 @@
 // == TavernHelper Script ==
 // name: 分支页面暂存器
 // author: Codex
-// version: v0.32
+// version: v0.33
 // description: 将未读分支页面原文保存到指定世界书的关闭条目中，并在酒馆助手面板内按当前酒馆渲染规则预览。
 
 (function () {
   'use strict';
 
   const SCRIPT_NAME = '分支页面暂存器';
-  const SCRIPT_VERSION = 'v0.32';
+  const SCRIPT_VERSION = 'v0.33';
   const BUTTON_NAME = '分支暂存';
   const GLOBAL_INSTANCE_KEY = '__th_branch_page_stash_instance_v1__';
   const INSTANCE_ID = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
@@ -34,23 +34,12 @@
   };
 
   function getHostWindow() {
-    let current = window;
-    let best = window;
-    let bestArea = getWindowArea(window);
-    for (let index = 0; index < 8; index += 1) {
-      try {
-        if (!current.parent || current.parent === current || !current.parent.document) break;
-        current = current.parent;
-        const area = getWindowArea(current);
-        if (area >= bestArea) {
-          best = current;
-          bestArea = area;
-        }
-      } catch (error) {
-        break;
-      }
+    try {
+      if (window.top && window.top.document) return window.top;
+    } catch (error) {
+      // Fall back to the current frame when the top document is not accessible.
     }
-    return best;
+    return window;
   }
 
   function getWindowArea(targetWindow) {
@@ -1438,7 +1427,8 @@
     const right = mobile ? 14 : 16;
     const bottom = mobile ? 112 : 164;
     const radius = mobile ? 16 : 15;
-    return `position:fixed;right:${right}px;bottom:calc(env(safe-area-inset-bottom, 0px) + ${bottom}px);z-index:2147483647;width:${size}px;height:${size}px;padding:0;border-radius:${radius}px;border:1px solid ${colors.border};background:${colors.background};color:${colors.color};box-shadow:0 10px 26px ${colors.shadow};font-size:25px;line-height:${size - 2}px;text-align:center;font-weight:800;cursor:grab;touch-action:none;user-select:none;-webkit-user-select:none;-webkit-tap-highlight-color:transparent;visibility:visible;opacity:1;pointer-events:auto;`;
+    const vertical = mobile ? 'top:calc(env(safe-area-inset-top, 0px) + 18px);bottom:auto;' : `bottom:calc(env(safe-area-inset-bottom, 0px) + ${bottom}px);`;
+    return `position:fixed;right:${right}px;${vertical}z-index:2147483647;width:${size}px;height:${size}px;padding:0;border-radius:${radius}px;border:1px solid ${colors.border};background:${colors.background};color:${colors.color};box-shadow:0 10px 26px ${colors.shadow};font-size:22px;line-height:${size - 2}px;text-align:center;font-weight:900;cursor:grab;touch-action:none;user-select:none;-webkit-user-select:none;-webkit-tap-highlight-color:transparent;visibility:visible;opacity:1;pointer-events:auto;`;
   }
 
   function ensureFloatingButtonInViewport(button) {
@@ -2314,7 +2304,6 @@
   function injectFallbackButton() {
     const doc = getHostDocument();
     const widget = ensureWidgetContainer();
-    const floatingParent = doc.body || widget;
     const activeOverlay = syncWidgetOpenState(widget);
     removeMinimizedButton();
     let existing = doc.getElementById(FLOATING_BUTTON_ID);
@@ -2328,7 +2317,7 @@
     }
     if (existing) {
       existing.type = 'button';
-      existing.textContent = '🎭';
+      existing.textContent = '暂';
       existing.title = '打开分支页面暂存器';
       existing.setAttribute('aria-label', '打开分支页面暂存器');
       existing.dataset.thBranchStashVersion = SCRIPT_VERSION;
@@ -2337,13 +2326,13 @@
       existing.style.display = activeOverlay ? 'none' : '';
       if (!activeOverlay) ensureFloatingButtonInViewport(existing);
       bindFloatingButtonDrag(existing, () => openPanel().catch((error) => notify('error', error.message || String(error))));
-      if (existing.parentNode !== floatingParent) floatingParent.appendChild(existing);
+      if (existing.parentNode !== widget) widget.appendChild(existing);
       return;
     }
     const button = doc.createElement('button');
     button.id = FLOATING_BUTTON_ID;
     button.type = 'button';
-    button.textContent = '🎭';
+    button.textContent = '暂';
     button.title = '打开分支页面暂存器';
     button.setAttribute('aria-label', '打开分支页面暂存器');
     button.dataset.thBranchStashVersion = SCRIPT_VERSION;
@@ -2351,7 +2340,7 @@
     applyFloatingButtonPosition(button);
     button.style.display = activeOverlay ? 'none' : '';
     bindFloatingButtonDrag(button, () => openPanel().catch((error) => notify('error', error.message || String(error))));
-    floatingParent.appendChild(button);
+    widget.appendChild(button);
     if (!activeOverlay) ensureFloatingButtonInViewport(button);
   }
 
