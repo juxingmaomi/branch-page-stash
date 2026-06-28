@@ -1,14 +1,14 @@
 // == TavernHelper Script ==
 // name: 分支页面暂存器
 // author: Codex
-// version: v0.28
+// version: v0.29
 // description: 将未读分支页面原文保存到指定世界书的关闭条目中，并在酒馆助手面板内按当前酒馆渲染规则预览。
 
 (function () {
   'use strict';
 
   const SCRIPT_NAME = '分支页面暂存器';
-  const SCRIPT_VERSION = 'v0.28';
+  const SCRIPT_VERSION = 'v0.29';
   const BUTTON_NAME = '分支暂存';
   const GLOBAL_INSTANCE_KEY = '__th_branch_page_stash_instance_v1__';
   const INSTANCE_ID = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
@@ -819,13 +819,6 @@
         background: var(--th-branch-accent-bg);
         color: #ffffff;
       }
-      .th-branch-window-actions {
-        display: flex;
-        align-items: center;
-        gap: 6px;
-      }
-      .th-branch-close,
-      .th-branch-minimize,
       .th-branch-icon {
         width: 30px;
         height: 30px;
@@ -834,10 +827,6 @@
         background: var(--th-branch-icon-bg);
         color: var(--th-branch-text);
         cursor: pointer;
-      }
-      .th-branch-minimize {
-        font-weight: 900;
-        line-height: 1;
       }
       .th-branch-worldbook {
         display: grid;
@@ -1179,8 +1168,6 @@
         .th-branch-head {
           padding: 10px;
         }
-        .th-branch-close,
-        .th-branch-minimize,
         .th-branch-icon {
           width: 40px;
           height: 40px;
@@ -1280,10 +1267,6 @@
                 <button type="button" class="th-branch-theme-btn" data-action="theme" data-theme-value="light" aria-pressed="${theme === 'light' ? 'true' : 'false'}">白</button>
                 <button type="button" class="th-branch-theme-btn" data-action="theme" data-theme-value="green" aria-pressed="${theme === 'green' ? 'true' : 'false'}">绿</button>
               </div>
-            </div>
-            <div class="th-branch-window-actions">
-              <button type="button" class="th-branch-minimize" data-action="minimize" title="缩小成按钮" aria-label="缩小成按钮">_</button>
-              <button type="button" class="th-branch-close" data-action="close" title="关闭" aria-label="关闭">×</button>
             </div>
           </header>
           <section class="th-branch-worldbook">
@@ -1722,22 +1705,6 @@
     showFloatingButton();
   }
 
-  function closeOverlay($overlay) {
-    if (!$overlay || !$overlay.length) return;
-    if ($overlay.find('.th-branch-panel').length) {
-      minimizePanel($overlay.find('.th-branch-panel'));
-      return;
-    }
-    const cleanup = $overlay.data('cleanupViewport');
-    if (typeof cleanup === 'function') cleanup();
-    removeMinimizedButton();
-    const widget = getHostDocument().getElementById(WIDGET_ID);
-    if (widget) widget.dataset.panelOpen = 'false';
-    $overlay.remove();
-    injectFallbackButton();
-    showFloatingButton();
-  }
-
   function bindTapAction(node, action) {
     if (!node || node.dataset.thBranchTapBound === 'true') return;
     node.dataset.thBranchTapBound = 'true';
@@ -2070,14 +2037,6 @@
 
   function bindPanel($panel) {
     const $ = get$();
-
-    $panel.on('click', '[data-action="minimize"]', () => {
-      minimizePanel($panel);
-    });
-
-    $panel.on('click', '[data-action="close"]', () => {
-      closeOverlay($panel.closest('.th-branch-overlay'));
-    });
 
     $panel.on('click', '[data-action="theme"]', function () {
       setPanelTheme($panel, this.dataset.themeValue);
