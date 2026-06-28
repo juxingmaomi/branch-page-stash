@@ -1,14 +1,14 @@
 // == TavernHelper Script ==
 // name: 分支页面暂存器
 // author: Codex
-// version: v0.29
+// version: v0.30
 // description: 将未读分支页面原文保存到指定世界书的关闭条目中，并在酒馆助手面板内按当前酒馆渲染规则预览。
 
 (function () {
   'use strict';
 
   const SCRIPT_NAME = '分支页面暂存器';
-  const SCRIPT_VERSION = 'v0.29';
+  const SCRIPT_VERSION = 'v0.30';
   const BUTTON_NAME = '分支暂存';
   const GLOBAL_INSTANCE_KEY = '__th_branch_page_stash_instance_v1__';
   const INSTANCE_ID = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
@@ -803,6 +803,21 @@
         gap: 5px;
         margin-top: 7px;
       }
+      .th-branch-mobile-return {
+        display: none;
+        align-items: center;
+        justify-content: center;
+        min-height: 36px;
+        margin-top: 10px;
+        padding: 0 14px;
+        border: 1px solid var(--th-branch-accent);
+        border-radius: 8px;
+        background: var(--th-branch-accent-bg);
+        color: #ffffff;
+        font-size: 14px;
+        font-weight: 800;
+        cursor: pointer;
+      }
       .th-branch-theme-btn {
         min-width: 30px;
         min-height: 24px;
@@ -1152,6 +1167,8 @@
           display: block;
           overflow: auto;
           -webkit-overflow-scrolling: touch;
+          padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 96px);
+          scroll-padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 96px);
         }
         @supports (height: 100dvh) {
           .th-branch-panel {
@@ -1166,7 +1183,21 @@
           border-bottom: 1px solid var(--th-branch-soft-border);
         }
         .th-branch-head {
+          position: sticky;
+          top: 0;
+          z-index: 5;
           padding: 10px;
+          background: var(--th-branch-sidebar-bg);
+          box-shadow: 0 1px 0 var(--th-branch-soft-border);
+        }
+        .th-branch-mobile-return {
+          display: inline-flex;
+          position: fixed;
+          right: 12px;
+          bottom: calc(env(safe-area-inset-bottom, 0px) + 112px);
+          z-index: 2147483647;
+          min-height: 44px;
+          box-shadow: 0 10px 26px rgba(0, 0, 0, 0.28);
         }
         .th-branch-icon {
           width: 40px;
@@ -1267,6 +1298,7 @@
                 <button type="button" class="th-branch-theme-btn" data-action="theme" data-theme-value="light" aria-pressed="${theme === 'light' ? 'true' : 'false'}">白</button>
                 <button type="button" class="th-branch-theme-btn" data-action="theme" data-theme-value="green" aria-pressed="${theme === 'green' ? 'true' : 'false'}">绿</button>
               </div>
+              <button type="button" class="th-branch-mobile-return" data-action="minimize-panel">返回酒馆</button>
             </div>
           </header>
           <section class="th-branch-worldbook">
@@ -1366,6 +1398,20 @@
     return active;
   }
 
+  function getViewportSize() {
+    const host = getHostWindow();
+    const doc = getHostDocument();
+    const visual = host.visualViewport;
+    return {
+      width: visual && visual.width || host.innerWidth || doc.documentElement.clientWidth || 800,
+      height: visual && visual.height || host.innerHeight || doc.documentElement.clientHeight || 600,
+    };
+  }
+
+  function isMobileViewport() {
+    return getViewportSize().width <= 820;
+  }
+
   function getFloatingButtonStyle(theme) {
     const value = normalizeTheme(theme);
     const themes = {
@@ -1374,7 +1420,23 @@
       green: { border: '#91c788', background: '#2f6f59', color: '#ffffff', shadow: 'rgba(33, 60, 42, 0.24)' },
     };
     const colors = themes[value] || themes.dark;
-    return `position:fixed;right:16px;bottom:calc(env(safe-area-inset-bottom, 0px) + 164px);z-index:2147483647;width:52px;height:52px;padding:0;border-radius:15px;border:1px solid ${colors.border};background:${colors.background};color:${colors.color};box-shadow:0 10px 26px ${colors.shadow};font-size:25px;line-height:50px;text-align:center;font-weight:800;cursor:grab;touch-action:none;user-select:none;-webkit-user-select:none;-webkit-tap-highlight-color:transparent;`;
+    const mobile = isMobileViewport();
+    const size = mobile ? 56 : 52;
+    const right = mobile ? 14 : 16;
+    const bottom = mobile ? 112 : 164;
+    const radius = mobile ? 16 : 15;
+    return `position:fixed;right:${right}px;bottom:calc(env(safe-area-inset-bottom, 0px) + ${bottom}px);z-index:2147483647;width:${size}px;height:${size}px;padding:0;border-radius:${radius}px;border:1px solid ${colors.border};background:${colors.background};color:${colors.color};box-shadow:0 10px 26px ${colors.shadow};font-size:25px;line-height:${size - 2}px;text-align:center;font-weight:800;cursor:grab;touch-action:none;user-select:none;-webkit-user-select:none;-webkit-tap-highlight-color:transparent;visibility:visible;opacity:1;pointer-events:auto;`;
+  }
+
+  function ensureFloatingButtonInViewport(button) {
+    if (!button || button.style.display === 'none' || !button.isConnected) return;
+    const viewport = getViewportSize();
+    const rect = button.getBoundingClientRect();
+    if (!rect.width || !rect.height) return;
+    const outside = rect.right < 8 || rect.bottom < 8 || rect.left > viewport.width - 8 || rect.top > viewport.height - 8;
+    if (!outside) return;
+    floatingButtonPosition = null;
+    button.style.cssText = getFloatingButtonStyle(loadSettings().theme);
   }
 
   function getMinimizedButtonStyle(theme) {
@@ -1388,7 +1450,15 @@
 
   function showFloatingButton() {
     const button = getHostDocument().getElementById(FLOATING_BUTTON_ID);
-    if (button) button.style.display = '';
+    if (button) {
+      button.style.cssText = getFloatingButtonStyle(loadSettings().theme);
+      applyFloatingButtonPosition(button);
+      button.style.display = '';
+      button.style.visibility = 'visible';
+      button.style.opacity = '1';
+      button.style.pointerEvents = 'auto';
+      ensureFloatingButtonInViewport(button);
+    }
   }
 
   function hideFloatingButton() {
@@ -2038,6 +2108,10 @@
   function bindPanel($panel) {
     const $ = get$();
 
+    $panel.on('click', '[data-action="minimize-panel"]', () => {
+      minimizePanel($panel);
+    });
+
     $panel.on('click', '[data-action="theme"]', function () {
       setPanelTheme($panel, this.dataset.themeValue);
     });
@@ -2243,6 +2317,7 @@
       existing.style.cssText = getFloatingButtonStyle(loadSettings().theme);
       applyFloatingButtonPosition(existing);
       existing.style.display = activeOverlay ? 'none' : '';
+      if (!activeOverlay) ensureFloatingButtonInViewport(existing);
       bindFloatingButtonDrag(existing, () => openPanel().catch((error) => notify('error', error.message || String(error))));
       if (existing.parentNode !== widget) widget.appendChild(existing);
       return;
@@ -2259,6 +2334,7 @@
     button.style.display = activeOverlay ? 'none' : '';
     bindFloatingButtonDrag(button, () => openPanel().catch((error) => notify('error', error.message || String(error))));
     widget.appendChild(button);
+    if (!activeOverlay) ensureFloatingButtonInViewport(button);
   }
 
   function installFloatingButtonGuard() {
@@ -2278,7 +2354,17 @@
         const activeOverlay = syncWidgetOpenState(widget);
         const buttonStale = button && button.dataset.thBranchStashVersion !== SCRIPT_VERSION;
         const buttonHiddenWithoutPanel = button && !activeOverlay && button.style.display === 'none';
-        if (!button || buttonStale || buttonHiddenWithoutPanel) {
+        let buttonInvisible = false;
+        let buttonOutside = false;
+        if (button && !activeOverlay) {
+          const style = getHostWindow().getComputedStyle ? getHostWindow().getComputedStyle(button) : null;
+          buttonInvisible = !!style && (style.display === 'none' || style.visibility === 'hidden' || Number(style.opacity) === 0);
+          const rect = button.getBoundingClientRect();
+          const viewport = getViewportSize();
+          buttonOutside = !rect.width || !rect.height || rect.right < 8 || rect.bottom < 8 || rect.left > viewport.width - 8 || rect.top > viewport.height - 8;
+        }
+        if (buttonOutside) floatingButtonPosition = null;
+        if (!button || buttonStale || buttonHiddenWithoutPanel || buttonInvisible || buttonOutside) {
           injectFallbackButton();
         }
       } catch (error) {
