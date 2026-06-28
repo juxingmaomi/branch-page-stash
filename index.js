@@ -1,14 +1,14 @@
 // == TavernHelper Script ==
 // name: 分支页面暂存器
 // author: Codex
-// version: v0.31
+// version: v0.32
 // description: 将未读分支页面原文保存到指定世界书的关闭条目中，并在酒馆助手面板内按当前酒馆渲染规则预览。
 
 (function () {
   'use strict';
 
   const SCRIPT_NAME = '分支页面暂存器';
-  const SCRIPT_VERSION = 'v0.31';
+  const SCRIPT_VERSION = 'v0.32';
   const BUTTON_NAME = '分支暂存';
   const GLOBAL_INSTANCE_KEY = '__th_branch_page_stash_instance_v1__';
   const INSTANCE_ID = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
@@ -95,7 +95,7 @@
 
   function removeOwnedDom() {
     const doc = getHostDocument();
-    [WIDGET_ID, STYLE_ID].forEach((id) => {
+    [WIDGET_ID, STYLE_ID, FLOATING_BUTTON_ID, MINIMIZED_BUTTON_ID].forEach((id) => {
       const node = doc.getElementById(id);
       if (node) node.remove();
     });
@@ -808,18 +808,22 @@
         gap: 5px;
         margin-top: 7px;
       }
-      .th-branch-mobile-return {
+      .th-branch-window-actions {
         display: none;
         align-items: center;
-        justify-content: center;
-        min-height: 36px;
-        margin-top: 10px;
-        padding: 0 14px;
+        gap: 6px;
+      }
+      .th-branch-close {
+        display: inline-grid;
+        place-items: center;
+        width: 34px;
+        height: 34px;
         border: 1px solid var(--th-branch-accent);
         border-radius: 8px;
         background: var(--th-branch-accent-bg);
         color: #ffffff;
-        font-size: 14px;
+        font-size: 22px;
+        line-height: 1;
         font-weight: 800;
         cursor: pointer;
       }
@@ -1195,14 +1199,16 @@
           background: var(--th-branch-sidebar-bg);
           box-shadow: 0 1px 0 var(--th-branch-soft-border);
         }
-        .th-branch-mobile-return {
-          display: inline-flex;
-          position: fixed;
-          right: 12px;
-          bottom: calc(env(safe-area-inset-bottom, 0px) + 112px);
-          z-index: 2147483647;
+        .th-branch-window-actions {
+          display: flex;
+        }
+        .th-branch-close {
+          width: 44px;
+          height: 44px;
+          min-width: 44px;
           min-height: 44px;
-          box-shadow: 0 10px 26px rgba(0, 0, 0, 0.28);
+          border-radius: 10px;
+          font-size: 28px;
         }
         .th-branch-icon {
           width: 40px;
@@ -1303,7 +1309,9 @@
                 <button type="button" class="th-branch-theme-btn" data-action="theme" data-theme-value="light" aria-pressed="${theme === 'light' ? 'true' : 'false'}">白</button>
                 <button type="button" class="th-branch-theme-btn" data-action="theme" data-theme-value="green" aria-pressed="${theme === 'green' ? 'true' : 'false'}">绿</button>
               </div>
-              <button type="button" class="th-branch-mobile-return" data-action="minimize-panel">返回酒馆</button>
+            </div>
+            <div class="th-branch-window-actions">
+              <button type="button" class="th-branch-close" data-action="minimize-panel" title="返回酒馆" aria-label="返回酒馆">×</button>
             </div>
           </header>
           <section class="th-branch-worldbook">
@@ -1454,7 +1462,11 @@
   }
 
   function showFloatingButton() {
-    const button = getHostDocument().getElementById(FLOATING_BUTTON_ID);
+    let button = getHostDocument().getElementById(FLOATING_BUTTON_ID);
+    if (!button) {
+      injectFallbackButton();
+      button = getHostDocument().getElementById(FLOATING_BUTTON_ID);
+    }
     if (button) {
       button.style.cssText = getFloatingButtonStyle(loadSettings().theme);
       applyFloatingButtonPosition(button);
@@ -2302,6 +2314,7 @@
   function injectFallbackButton() {
     const doc = getHostDocument();
     const widget = ensureWidgetContainer();
+    const floatingParent = doc.body || widget;
     const activeOverlay = syncWidgetOpenState(widget);
     removeMinimizedButton();
     let existing = doc.getElementById(FLOATING_BUTTON_ID);
@@ -2324,7 +2337,7 @@
       existing.style.display = activeOverlay ? 'none' : '';
       if (!activeOverlay) ensureFloatingButtonInViewport(existing);
       bindFloatingButtonDrag(existing, () => openPanel().catch((error) => notify('error', error.message || String(error))));
-      if (existing.parentNode !== widget) widget.appendChild(existing);
+      if (existing.parentNode !== floatingParent) floatingParent.appendChild(existing);
       return;
     }
     const button = doc.createElement('button');
@@ -2338,7 +2351,7 @@
     applyFloatingButtonPosition(button);
     button.style.display = activeOverlay ? 'none' : '';
     bindFloatingButtonDrag(button, () => openPanel().catch((error) => notify('error', error.message || String(error))));
-    widget.appendChild(button);
+    floatingParent.appendChild(button);
     if (!activeOverlay) ensureFloatingButtonInViewport(button);
   }
 
