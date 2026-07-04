@@ -1,14 +1,14 @@
 // == TavernHelper Script ==
 // name: 分支页面暂存器
 // author: Codex
-// version: v0.34
+// version: v0.35
 // description: 将未读分支页面原文保存到指定世界书的关闭条目中，并在酒馆助手面板内按当前酒馆渲染规则预览。
 
 (function () {
   'use strict';
 
   const SCRIPT_NAME = '分支页面暂存器';
-  const SCRIPT_VERSION = 'v0.34';
+  const SCRIPT_VERSION = 'v0.35';
   const BUTTON_NAME = '分支暂存';
   const GLOBAL_INSTANCE_KEY = '__th_branch_page_stash_instance_v1__';
   const INSTANCE_ID = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
@@ -697,7 +697,7 @@
         border-radius: 8px;
         background: var(--th-branch-panel-bg);
         color: var(--th-branch-text);
-        box-shadow: 0 18px 48px rgba(0, 0, 0, 0.38);
+        box-shadow: none;
         font-family: "Microsoft YaHei", "PingFang SC", sans-serif;
       }
       @supports (height: 100dvh) {
@@ -1186,7 +1186,7 @@
           z-index: 5;
           padding: 10px;
           background: var(--th-branch-sidebar-bg);
-          box-shadow: 0 1px 0 var(--th-branch-soft-border);
+          box-shadow: none;
         }
         .th-branch-window-actions {
           display: flex;
@@ -1417,9 +1417,9 @@
   function getFloatingButtonStyle(theme) {
     const value = normalizeTheme(theme);
     const themes = {
-      dark: { border: '#77c0a6', background: '#1f6ed4', color: '#ffffff', shadow: 'rgba(0, 0, 0, 0.34)' },
-      light: { border: '#3d8e70', background: '#2f7ed8', color: '#ffffff', shadow: 'rgba(30, 44, 38, 0.16)' },
-      green: { border: '#91c788', background: '#2f6f59', color: '#ffffff', shadow: 'rgba(33, 60, 42, 0.24)' },
+      dark: { border: '#77c0a6', background: '#1f6ed4', color: '#ffffff' },
+      light: { border: '#3d8e70', background: '#2f7ed8', color: '#ffffff' },
+      green: { border: '#91c788', background: '#2f6f59', color: '#ffffff' },
     };
     const colors = themes[value] || themes.dark;
     const mobile = isMobileViewport();
@@ -1428,7 +1428,7 @@
     const bottom = mobile ? 112 : 164;
     const radius = mobile ? 16 : 15;
     const vertical = mobile ? 'top:calc(env(safe-area-inset-top, 0px) + 18px);bottom:auto;' : `bottom:calc(env(safe-area-inset-bottom, 0px) + ${bottom}px);`;
-    return `position:fixed;right:${right}px;${vertical}z-index:2147483647;width:${size}px;height:${size}px;padding:0;border-radius:${radius}px;border:1px solid ${colors.border};background:${colors.background};color:${colors.color};box-shadow:0 10px 26px ${colors.shadow};font-size:22px;line-height:${size - 2}px;text-align:center;font-weight:900;cursor:grab;touch-action:none;user-select:none;-webkit-user-select:none;-webkit-tap-highlight-color:transparent;visibility:visible;opacity:1;pointer-events:auto;`;
+    return `position:fixed;right:${right}px;${vertical}z-index:2147483647;width:${size}px;height:${size}px;padding:0;border-radius:${radius}px;border:1px solid ${colors.border};background:${colors.background};color:${colors.color};box-shadow:none;font-size:22px;line-height:${size - 2}px;text-align:center;font-weight:900;cursor:grab;touch-action:none;user-select:none;-webkit-user-select:none;-webkit-tap-highlight-color:transparent;visibility:visible;opacity:1;pointer-events:auto;`;
   }
 
   function ensureFloatingButtonInViewport(button) {
