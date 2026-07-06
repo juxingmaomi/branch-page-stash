@@ -1,14 +1,14 @@
 // == TavernHelper Script ==
 // name: 分支页面暂存器
 // author: Codex
-// version: v0.35
+// version: v0.36
 // description: 将未读分支页面原文保存到指定世界书的关闭条目中，并在酒馆助手面板内按当前酒馆渲染规则预览。
 
 (function () {
   'use strict';
 
   const SCRIPT_NAME = '分支页面暂存器';
-  const SCRIPT_VERSION = 'v0.35';
+  const SCRIPT_VERSION = 'v0.36';
   const BUTTON_NAME = '分支暂存';
   const GLOBAL_INSTANCE_KEY = '__th_branch_page_stash_instance_v1__';
   const INSTANCE_ID = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
@@ -239,8 +239,26 @@
     const host = getHostWindow();
     try {
       const st = host.SillyTavern || host;
-      if (st && st.characters && st.characterId !== undefined && st.characters[st.characterId]) {
-        return st.characters[st.characterId].name || '';
+      const context = st && typeof st.getContext === 'function' ? st.getContext() : null;
+      const sources = [context, st, host].filter(Boolean);
+      const ids = [];
+      const collections = [];
+      for (const source of sources) {
+        if (source.characterId !== undefined) ids.push(source.characterId);
+        if (source.this_chid !== undefined) ids.push(source.this_chid);
+        if (source.character_id !== undefined) ids.push(source.character_id);
+        if (source.characters) collections.push(source.characters);
+      }
+      for (const collection of collections) {
+        for (const id of ids) {
+          const character = collection && collection[id];
+          if (character && character.name) return String(character.name).trim();
+        }
+      }
+      for (const source of sources) {
+        const directName = source.characterName || source.name2 || source.currentCharacterName;
+        if (directName) return String(directName).trim();
+        if (source.character && source.character.name) return String(source.character.name).trim();
       }
     } catch (error) {
       console.warn(`[${SCRIPT_NAME}] 获取角色名失败`, error);
@@ -928,6 +946,15 @@
         text-overflow: ellipsis;
         white-space: nowrap;
         font-size: 13px;
+      }
+      .th-branch-character-line {
+        display: block;
+        margin-top: 3px;
+        overflow: hidden;
+        color: var(--th-branch-muted);
+        font-size: 12px;
+        text-overflow: ellipsis;
+        white-space: nowrap;
       }
       .th-branch-item span {
         overflow: hidden;
@@ -1980,7 +2007,8 @@
         $list.html(entries.map((entry) => {
           const meta = getEntryMeta(entry);
           const current = Number(entry.uid) === selectedUid;
-          const detail = [formatDate(meta.savedAt), meta.characterName, meta.chatTitle].filter(Boolean).join(' / ');
+          const characterLine = meta.characterName ? `角色卡：${meta.characterName}` : '';
+          const detail = [formatDate(meta.savedAt), meta.chatTitle].filter(Boolean).join(' / ');
           const isRead = Boolean(meta.readAt);
           const readDetail = isRead ? `已读 ${formatDate(meta.readAt)}` : '未读';
           return `
@@ -1988,6 +2016,7 @@
               <div class="th-branch-item-top">
                 <button type="button" class="th-branch-open" data-action="open-stash" data-uid="${escapeAttr(entry.uid)}">
                   <strong>${escapeHtml(meta.title)}</strong>
+                  ${characterLine ? `<div class="th-branch-character-line">${escapeHtml(characterLine)}</div>` : ''}
                 </button>
                 <div class="th-branch-item-actions">
                   <button type="button" class="th-branch-read-toggle" data-action="toggle-read" data-uid="${escapeAttr(entry.uid)}" aria-pressed="${isRead ? 'true' : 'false'}">${isRead ? '已读' : '标记已读'}</button>
