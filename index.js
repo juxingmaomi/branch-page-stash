@@ -1,14 +1,14 @@
 // == TavernHelper Script ==
 // name: 分支页面暂存器
 // author: Codex
-// version: v0.44
+// version: v0.45
 // description: 将未读分支页面原文保存到指定世界书的关闭条目中，并在酒馆助手面板内按当前酒馆渲染规则预览。
 
 (function () {
   'use strict';
 
   const SCRIPT_NAME = '分支页面暂存器';
-  const SCRIPT_VERSION = 'v0.44';
+  const SCRIPT_VERSION = 'v0.45';
   const BUTTON_NAME = '分支暂存';
   const GLOBAL_INSTANCE_KEY = '__th_branch_page_stash_instance_v1__';
   const INSTANCE_ID = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
@@ -1144,6 +1144,23 @@
         align-items: center;
         gap: 6px;
       }
+      .th-branch-mobile-main-head {
+        display: none;
+      }
+      .th-branch-mobile-head-action {
+        display: inline-grid;
+        place-items: center;
+        width: 40px;
+        height: 40px;
+        min-width: 40px;
+        padding: 0;
+        border: 1px solid var(--th-branch-border);
+        border-radius: 7px;
+        background: var(--th-branch-button-bg);
+        color: var(--th-branch-text);
+        font-size: 17px;
+        cursor: pointer;
+      }
       .th-branch-close {
         display: inline-grid;
         place-items: center;
@@ -1255,6 +1272,9 @@
         flex: 0 0 auto;
         gap: 6px;
       }
+      .th-branch-item-actions i {
+        display: none;
+      }
       .th-branch-open {
         min-width: 0;
         border: 0;
@@ -1289,6 +1309,10 @@
       }
       .th-branch-read-toggle,
       .th-branch-delete-toggle {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 5px;
         min-height: 26px;
         border: 1px solid var(--th-branch-border);
         border-radius: 999px;
@@ -1578,10 +1602,9 @@
           border-radius: 0;
           min-height: 0;
           display: block;
-          overflow: auto;
+          overflow: hidden;
           -webkit-overflow-scrolling: touch;
-          padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 96px);
-          scroll-padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 96px);
+          padding: 0;
         }
         @supports (height: 100dvh) {
           .th-branch-panel {
@@ -1590,18 +1613,42 @@
           }
         }
         .th-branch-sidebar {
-          display: block;
-          overflow: visible;
+          display: flex;
+          width: 100%;
+          height: 100%;
+          min-height: 0;
+          overflow: hidden;
+          flex-direction: column;
           border-right: 0;
-          border-bottom: 1px solid var(--th-branch-soft-border);
+          border-bottom: 0;
         }
         .th-branch-head {
-          position: sticky;
-          top: 0;
-          z-index: 5;
-          padding: 10px;
+          position: relative;
+          z-index: 6;
+          flex: 0 0 auto;
+          padding: calc(env(safe-area-inset-top, 0px) + 10px) 10px 10px;
           background: var(--th-branch-sidebar-bg);
           box-shadow: none;
+        }
+        .th-branch-head > div:first-child {
+          min-width: 0;
+        }
+        .th-branch-title {
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+          font-size: 15px;
+        }
+        .th-branch-version,
+        .th-branch-update-line,
+        .th-branch-theme-switch {
+          display: none;
+        }
+        .th-branch-panel.th-branch-mobile-settings-open .th-branch-update-line {
+          display: block;
+        }
+        .th-branch-panel.th-branch-mobile-settings-open .th-branch-theme-switch {
+          display: flex;
         }
         .th-branch-window-actions {
           display: flex;
@@ -1628,29 +1675,125 @@
           min-height: 38px;
         }
         .th-branch-worldbook {
+          flex: 0 0 auto;
           padding: 10px;
+        }
+        .th-branch-worldbook > label {
+          display: none;
+        }
+        .th-branch-worldbook .th-branch-select,
+        .th-branch-worldbook .th-branch-input {
+          min-height: 40px;
+        }
+        .th-branch-worldbook .th-branch-row {
+          display: none;
+        }
+        .th-branch-panel.th-branch-mobile-settings-open .th-branch-worldbook .th-branch-row {
+          display: flex;
         }
         .th-branch-list {
-          max-height: 34vh;
-          min-height: 96px;
+          flex: 1 1 auto;
+          max-height: none;
+          min-height: 0;
           overflow: auto;
-          border-bottom: 1px solid var(--th-branch-soft-border);
+          padding: 8px 10px calc(env(safe-area-inset-bottom, 0px) + 16px);
+          border-bottom: 0;
           -webkit-overflow-scrolling: touch;
+          overscroll-behavior: contain;
         }
         .th-branch-main {
-          display: block;
-          overflow: visible;
+          display: none;
+          width: 100%;
+          height: 100%;
+          min-height: 0;
+          overflow: hidden;
+          flex-direction: column;
+          background: var(--th-branch-preview-bg);
+        }
+        .th-branch-panel[data-mobile-view="list"] .th-branch-sidebar {
+          display: flex;
+        }
+        .th-branch-panel[data-mobile-view="list"] .th-branch-main {
+          display: none;
+        }
+        .th-branch-panel[data-mobile-view="reader"] .th-branch-sidebar,
+        .th-branch-panel[data-mobile-view="edit"] .th-branch-sidebar {
+          display: none;
+        }
+        .th-branch-panel[data-mobile-view="reader"] .th-branch-main,
+        .th-branch-panel[data-mobile-view="edit"] .th-branch-main {
+          display: flex;
+        }
+        .th-branch-mobile-main-head {
+          display: grid;
+          grid-template-columns: 92px minmax(0, 1fr) 92px;
+          align-items: center;
+          gap: 8px;
+          flex: 0 0 auto;
+          min-height: 56px;
+          padding: calc(env(safe-area-inset-top, 0px) + 6px) 10px 6px;
+          border-bottom: 1px solid var(--th-branch-soft-border);
+          background: var(--th-branch-sidebar-bg);
+        }
+        .th-branch-mobile-heading {
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+          font-size: 15px;
+          font-weight: 800;
+          text-align: center;
+        }
+        .th-branch-mobile-main-actions {
+          display: flex;
+          align-items: center;
+          justify-content: flex-end;
+          gap: 6px;
+        }
+        .th-branch-panel[data-mobile-view="edit"] .th-branch-mobile-edit-action {
+          display: none;
         }
         .th-branch-editor {
-          padding: 10px;
+          flex: 1 1 auto;
+          min-height: 0;
+          overflow: auto;
+          padding: 12px 10px calc(env(safe-area-inset-bottom, 0px) + 18px);
+          -webkit-overflow-scrolling: touch;
+          overscroll-behavior: contain;
+        }
+        .th-branch-panel[data-mobile-view="reader"] .th-branch-editor {
+          display: none !important;
+        }
+        .th-branch-panel[data-mobile-view="edit"] .th-branch-editor {
+          display: grid !important;
+        }
+        .th-branch-actions {
+          display: grid;
+          grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+          align-items: stretch;
+        }
+        .th-branch-actions .th-branch-status {
+          grid-column: 1 / -1;
+        }
+        .th-branch-actions [data-action="immersive-mode"] {
+          display: none;
         }
         .th-branch-preview {
-          padding: 12px;
+          display: none;
+          flex: 1 1 auto;
+          min-height: 0;
+          overflow: auto;
+          padding: 12px 10px calc(env(safe-area-inset-bottom, 0px) + 18px);
+          -webkit-overflow-scrolling: touch;
+          overscroll-behavior: contain;
+        }
+        .th-branch-panel[data-mobile-view="reader"] .th-branch-preview {
+          display: block;
+        }
+        .th-branch-panel[data-mobile-view="edit"] .th-branch-preview {
+          display: none;
         }
         .th-branch-readerbar {
-          top: -12px;
-          margin: -12px -12px 12px;
-          padding: 10px 12px;
+          display: none;
         }
         .th-branch-readerbar-actions {
           gap: 6px;
@@ -1671,8 +1814,43 @@
           min-height: 32px;
           padding: 5px 9px;
         }
+        .th-branch-item {
+          margin-bottom: 7px;
+          padding: 11px 10px;
+        }
+        .th-branch-item-top {
+          align-items: start;
+        }
+        .th-branch-item-actions {
+          gap: 4px;
+        }
+        .th-branch-read-toggle,
+        .th-branch-delete-toggle {
+          display: inline-grid;
+          place-items: center;
+          width: 38px;
+          min-width: 38px;
+          height: 38px;
+          min-height: 38px;
+          padding: 0;
+          border-radius: 7px;
+        }
+        .th-branch-item-action-label {
+          display: none;
+        }
+        .th-branch-item-actions i {
+          display: inline-block;
+        }
+        .th-branch-preview-card,
+        .th-branch-preview-document,
+        .th-branch-render-warning,
+        .th-branch-readerbottom {
+          width: 100%;
+          max-width: 100%;
+          box-sizing: border-box;
+        }
       }
-      @media (max-height: 560px) {
+      @media (min-width: 821px) and (max-height: 560px) {
         .th-branch-panel {
           grid-template-rows: minmax(0, auto) minmax(0, 1fr);
         }
@@ -1702,7 +1880,7 @@
     const versionLabel = getVersionLabel();
     const versionDetail = getVersionDetail();
     return `
-      <div class="th-branch-panel" data-mode="edit" data-theme="${escapeAttr(theme)}">
+      <div class="th-branch-panel" data-mode="edit" data-mobile-view="list" data-has-selection="false" data-theme="${escapeAttr(theme)}">
         <aside class="th-branch-sidebar">
           <header class="th-branch-head">
             <div>
@@ -1715,7 +1893,9 @@
               </div>
             </div>
             <div class="th-branch-window-actions">
-              <button type="button" class="th-branch-close" data-action="minimize-panel" title="返回酒馆" aria-label="返回酒馆">×</button>
+              <button type="button" class="th-branch-mobile-head-action" data-action="new-entry" title="新建暂存" aria-label="新建暂存"><i class="fa-solid fa-plus" aria-hidden="true"></i></button>
+              <button type="button" class="th-branch-mobile-head-action" data-action="toggle-mobile-settings" title="设置" aria-label="设置"><i class="fa-solid fa-gear" aria-hidden="true"></i></button>
+              <button type="button" class="th-branch-close" data-action="minimize-panel" title="返回酒馆" aria-label="返回酒馆"><i class="fa-solid fa-xmark" aria-hidden="true"></i></button>
             </div>
           </header>
           <section class="th-branch-worldbook">
@@ -1734,6 +1914,14 @@
           </div>
         </aside>
         <main class="th-branch-main">
+          <header class="th-branch-mobile-main-head">
+            <button type="button" class="th-branch-mobile-head-action" data-action="return-list" title="返回列表" aria-label="返回列表"><i class="fa-solid fa-arrow-left" aria-hidden="true"></i></button>
+            <strong class="th-branch-mobile-heading" data-mobile-heading>暂存内容</strong>
+            <div class="th-branch-mobile-main-actions">
+              <button type="button" class="th-branch-mobile-head-action th-branch-mobile-edit-action" data-action="edit-mode" title="编辑" aria-label="编辑"><i class="fa-solid fa-pencil" aria-hidden="true"></i></button>
+              <button type="button" class="th-branch-mobile-head-action" data-action="minimize-panel" title="返回酒馆" aria-label="返回酒馆"><i class="fa-solid fa-xmark" aria-hidden="true"></i></button>
+            </div>
+          </header>
           <section class="th-branch-editor">
             <div class="th-branch-field">
               <label>标题</label>
@@ -2230,16 +2418,6 @@
     });
   }
 
-  function isMobileLikeViewport() {
-    const host = getHostWindow();
-    try {
-      if (host.matchMedia && host.matchMedia('(pointer: coarse)').matches) return true;
-    } catch (error) {
-      // Continue with viewport fallback.
-    }
-    return (host.innerWidth || getHostDocument().documentElement.clientWidth || 9999) <= 820;
-  }
-
   function setStatus($panel, text) {
     $panel.find('[data-status]').text(text || '');
   }
@@ -2251,7 +2429,21 @@
   function setMode($panel, mode) {
     const nextMode = ['reader', 'immersive'].includes(mode) ? mode : 'edit';
     $panel.attr('data-mode', nextMode);
+    setMobileView($panel, nextMode === 'edit' ? 'edit' : 'reader');
     syncOverlayViewport($panel.closest('.th-branch-overlay'));
+  }
+
+  function getMobileHeading($panel, view) {
+    if (view === 'list') return '暂存列表';
+    if (view === 'edit') return $panel.attr('data-has-selection') === 'true' ? '编辑暂存' : '新建暂存';
+    return String($panel.find('[data-field="title"]').val() || '').trim() || '阅读暂存';
+  }
+
+  function setMobileView($panel, view, heading) {
+    const nextView = ['reader', 'edit'].includes(view) ? view : 'list';
+    if (nextView !== 'list') $panel.removeClass('th-branch-mobile-settings-open');
+    $panel.attr('data-mobile-view', nextView);
+    $panel.find('[data-mobile-heading]').text(heading || getMobileHeading($panel, nextView));
   }
 
   function syncOverlayViewport(overlayLike) {
@@ -2306,16 +2498,11 @@
 
   function returnToList($panel) {
     setMode($panel, 'reader');
+    setMobileView($panel, 'list');
     const preview = $panel.find('[data-preview]')[0];
     if (preview) preview.scrollTop = 0;
     const list = $panel.find('[data-list]')[0];
-    if (isMobileLikeViewport() && list && typeof list.scrollIntoView === 'function') {
-      try {
-        list.scrollIntoView({ block: 'start', behavior: 'smooth' });
-      } catch (error) {
-        list.scrollIntoView();
-      }
-    }
+    if (list) list.scrollTop = 0;
     setStatus($panel, '已返回列表');
   }
 
@@ -2346,6 +2533,7 @@
   function renderPreview($panel, raw, title) {
     const result = renderRawResult(raw);
     const safeTitle = title || String($panel.find('[data-field="title"]').val() || '').trim() || '未命名暂存';
+    $panel.find('[data-mobile-heading]').text(safeTitle);
     const warningHtml = result.warnings.length
       ? `<div class="th-branch-render-warning">${result.warnings.map(escapeHtml).join('<br>')}</div>`
       : '';
@@ -2378,6 +2566,7 @@
   function fillEditorFromEntry($panel, entry) {
     const meta = getEntryMeta(entry);
     $panel.data('selectedUid', entry.uid);
+    $panel.attr('data-has-selection', 'true');
     $panel.find('[data-field="title"]').val(meta.title || '');
     $panel.find('[data-field="raw"]').val(entry.content || '');
     renderPreview($panel, entry.content || '', meta.title || '');
@@ -2416,8 +2605,8 @@
                   ${characterLine ? `<div class="th-branch-character-line">${escapeHtml(characterLine)}</div>` : ''}
                 </button>
                 <div class="th-branch-item-actions">
-                  <button type="button" class="th-branch-read-toggle" data-action="toggle-read" data-uid="${escapeAttr(entry.uid)}" aria-pressed="${isRead ? 'true' : 'false'}">${isRead ? '已读' : '标记已读'}</button>
-                  <button type="button" class="th-branch-delete-toggle" data-action="delete-stash" data-uid="${escapeAttr(entry.uid)}">删除</button>
+                  <button type="button" class="th-branch-read-toggle" data-action="toggle-read" data-uid="${escapeAttr(entry.uid)}" aria-pressed="${isRead ? 'true' : 'false'}" title="${isRead ? '取消已读' : '标记已读'}" aria-label="${isRead ? '取消已读' : '标记已读'}"><i class="fa-solid ${isRead ? 'fa-check' : 'fa-check-double'}" aria-hidden="true"></i><span class="th-branch-item-action-label">${isRead ? '已读' : '标记已读'}</span></button>
+                  <button type="button" class="th-branch-delete-toggle" data-action="delete-stash" data-uid="${escapeAttr(entry.uid)}" title="删除" aria-label="删除"><i class="fa-solid fa-trash-can" aria-hidden="true"></i><span class="th-branch-item-action-label">删除</span></button>
                 </div>
               </div>
               <span>${escapeHtml(detail || `uid ${entry.uid}`)} · <span class="th-branch-read-badge">${escapeHtml(readDetail)}</span></span>
@@ -2455,6 +2644,7 @@
     const createdBook = await ensureWorldbook(worldbookName);
     const entry = await createStashEntry(worldbookName, title, raw);
     $panel.data('selectedUid', entry.uid || null);
+    $panel.attr('data-has-selection', 'true');
     saveSettings(getPanelSettings($panel));
     renderPreview($panel, raw, title);
     setMode($panel, 'reader');
@@ -2497,10 +2687,12 @@
     setStatus($panel, '删除中...');
     await deleteStashEntry(worldbookName, uid);
     $panel.removeData('selectedUid');
+    $panel.attr('data-has-selection', 'false');
     $panel.find('[data-field="title"]').val('');
     $panel.find('[data-field="raw"]').val('');
     $panel.find('[data-preview]').html('<div class="th-branch-preview-empty">保存或选择一个暂存页后在这里预览</div>');
     setMode($panel, 'edit');
+    setMobileView($panel, 'list');
     saveSettings(getPanelSettings($panel));
     await refreshList($panel);
     setStatus($panel, '已删除');
@@ -2517,10 +2709,12 @@
     await deleteStashEntry(getTargetWorldbook($panel), numericUid);
     if (Number($panel.data('selectedUid')) === numericUid) {
       $panel.removeData('selectedUid');
+      $panel.attr('data-has-selection', 'false');
       $panel.find('[data-field="title"]').val('');
       $panel.find('[data-field="raw"]').val('');
       $panel.find('[data-preview]').html('<div class="th-branch-preview-empty">保存或选择一个暂存页后在这里预览</div>');
       setMode($panel, 'edit');
+      setMobileView($panel, 'list');
       saveSettings(getPanelSettings($panel));
     }
     await refreshList($panel);
@@ -2529,6 +2723,7 @@
 
   function startNewEntry($panel) {
     $panel.removeData('selectedUid');
+    $panel.attr('data-has-selection', 'false');
     $panel.find('.th-branch-item').attr('aria-current', 'false');
     $panel.find('[data-field="title"]').val('');
     $panel.find('[data-field="raw"]').val('');
@@ -2547,6 +2742,10 @@
 
     $panel.on('click', '[data-action="theme"]', function () {
       setPanelTheme($panel, this.dataset.themeValue);
+    });
+
+    $panel.on('click', '[data-action="toggle-mobile-settings"]', () => {
+      $panel.toggleClass('th-branch-mobile-settings-open');
     });
 
     $panel.on('change', '[data-field="worldbookSelect"]', async function () {
