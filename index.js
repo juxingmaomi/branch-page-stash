@@ -1,14 +1,14 @@
 // == TavernHelper Script ==
 // name: 分支页面暂存器
 // author: Codex
-// version: v0.43
+// version: v0.44
 // description: 将未读分支页面原文保存到指定世界书的关闭条目中，并在酒馆助手面板内按当前酒馆渲染规则预览。
 
 (function () {
   'use strict';
 
   const SCRIPT_NAME = '分支页面暂存器';
-  const SCRIPT_VERSION = 'v0.43';
+  const SCRIPT_VERSION = 'v0.44';
   const BUTTON_NAME = '分支暂存';
   const GLOBAL_INSTANCE_KEY = '__th_branch_page_stash_instance_v1__';
   const INSTANCE_ID = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
@@ -23,6 +23,7 @@
   const MESSAGE_STASH_ROW_CLASS = 'th-branch-message-stash-row';
   const MESSAGE_STASH_BUTTON_CLASS = 'th-branch-message-stash-button';
   const MESSAGE_MARKER_FOOTER_CLASS = 'th-message-marker-footer';
+  const MAX_MESSAGE_STASH_BUTTONS = 5;
   let floatingButtonPosition = null;
   let minimizedButtonPosition = null;
   let floatingGuardObserver = null;
@@ -30,9 +31,9 @@
   let floatingRepairTimer = null;
   let bootRetryTimer = null;
   let previewFrameMessageHandler = null;
-  let messageButtonObserver = null;
   let messageButtonScanTimer = null;
   let messageButtonClickHandler = null;
+  let messageButtonEventBindings = [];
   let stoppingInstance = false;
 
   const DEFAULT_SETTINGS = {
@@ -112,15 +113,19 @@
       clearTimeout(messageButtonScanTimer);
       messageButtonScanTimer = null;
     }
-    if (messageButtonObserver) {
-      messageButtonObserver.disconnect();
-      messageButtonObserver = null;
-    }
+    messageButtonEventBindings.forEach(({ source, eventName, handler }) => {
+      if (source && typeof source.removeListener === 'function') source.removeListener(eventName, handler);
+    });
+    messageButtonEventBindings = [];
     if (messageButtonClickHandler) {
       doc.removeEventListener('click', messageButtonClickHandler, true);
       messageButtonClickHandler = null;
     }
-    doc.querySelectorAll(`.${MESSAGE_STASH_BUTTON_CLASS}, .${MESSAGE_STASH_ROW_CLASS}`).forEach((node) => node.remove());
+    doc.querySelectorAll(`.${MESSAGE_STASH_BUTTON_CLASS}`).forEach((node) => node.remove());
+    doc.querySelectorAll(`.${MESSAGE_STASH_ROW_CLASS}`).forEach((node) => {
+      node.classList.remove(MESSAGE_STASH_ROW_CLASS);
+      if (!node.children.length) node.remove();
+    });
   }
 
   function stopInstance() {
@@ -509,47 +514,74 @@
     }
   }
 
+  function getLatestAssistantMessageIds() {
+    const context = getTavernContext();
+    const chat = context && Array.isArray(context.chat) ? context.chat : [];
+    const ids = [];
+    for (let index = chat.length - 1; index >= 0 && ids.length < MAX_MESSAGE_STASH_BUTTONS; index -= 1) {
+      const message = chat[index];
+      if (!message || message.is_user || message.is_system || typeof message.mes !== 'string') continue;
+      ids.push(index);
+    }
+    return ids;
+  }
+
+  function removeMessageStashButton(button) {
+    const parent = button && button.parentElement;
+    if (button) button.remove();
+    if (parent && parent.classList.contains(MESSAGE_STASH_ROW_CLASS)) {
+      parent.classList.remove(MESSAGE_STASH_ROW_CLASS);
+      if (!parent.children.length) parent.remove();
+    }
+  }
+
+  function attachMessageStashButton(messageElement) {
+    if (!isAssistantMessageElement(messageElement)) return;
+    const doc = getHostDocument();
+    const messageBlock = messageElement.querySelector('.mes_block');
+    if (!messageBlock) return;
+
+    let footer = Array.from(messageBlock.children).find((child) => child.classList && child.classList.contains(MESSAGE_MARKER_FOOTER_CLASS));
+    if (!footer) {
+      footer = doc.createElement('div');
+      footer.className = `${MESSAGE_MARKER_FOOTER_CLASS} ${MESSAGE_STASH_ROW_CLASS}`;
+      footer.setAttribute('aria-label', '楼层操作');
+      messageBlock.appendChild(footer);
+    }
+
+    let button = messageBlock.querySelector(`.${MESSAGE_STASH_BUTTON_CLASS}`);
+    if (!button) {
+      button = doc.createElement('button');
+      button.type = 'button';
+      button.className = MESSAGE_STASH_BUTTON_CLASS;
+      button.title = '将这一层的完整原文保存到分支页面暂存器';
+      button.setAttribute('aria-label', '暂存本层完整原文');
+      button.innerHTML = '<i class="fa-solid fa-box-archive" aria-hidden="true"></i><span>暂存本层</span>';
+    }
+    if (button.parentElement !== footer || footer.firstChild !== button) footer.insertBefore(button, footer.firstChild);
+  }
+
   function injectMessageStashButtons() {
     const doc = getHostDocument();
-    doc.querySelectorAll('#chat .mes').forEach((messageElement) => {
-      if (!isAssistantMessageElement(messageElement)) return;
-      const messageBlock = messageElement.querySelector('.mes_block');
-      if (!messageBlock) return;
+    const allowedIds = new Set(getLatestAssistantMessageIds());
+    doc.querySelectorAll(`#chat .${MESSAGE_STASH_BUTTON_CLASS}`).forEach((button) => {
+      const messageElement = button.closest('.mes');
+      const messageId = Number(messageElement && messageElement.getAttribute('mesid'));
+      if (!allowedIds.has(messageId)) removeMessageStashButton(button);
+    });
 
-      let button = messageBlock.querySelector(`.${MESSAGE_STASH_BUTTON_CLASS}`);
-      if (!button) {
-        button = doc.createElement('button');
-        button.type = 'button';
-        button.className = MESSAGE_STASH_BUTTON_CLASS;
-        button.title = '将这一层的完整原文保存到分支页面暂存器';
-        button.setAttribute('aria-label', '暂存本层完整原文');
-        button.innerHTML = '<i class="fa-solid fa-box-archive" aria-hidden="true"></i><span>暂存本层</span>';
-      }
-
-      const markerFooter = Array.from(messageBlock.children).find((child) => child.classList && child.classList.contains(MESSAGE_MARKER_FOOTER_CLASS));
-      if (markerFooter) {
-        const fallbackRow = button.closest(`.${MESSAGE_STASH_ROW_CLASS}`);
-        markerFooter.insertBefore(button, markerFooter.firstChild);
-        if (fallbackRow) fallbackRow.remove();
-        return;
-      }
-
-      let row = Array.from(messageBlock.children).find((child) => child.classList && child.classList.contains(MESSAGE_STASH_ROW_CLASS));
-      if (!row) {
-        row = doc.createElement('div');
-        row.className = MESSAGE_STASH_ROW_CLASS;
-        messageBlock.appendChild(row);
-      }
-      if (button.parentElement !== row) row.appendChild(button);
+    allowedIds.forEach((messageId) => {
+      const messageElement = doc.querySelector(`#chat .mes[mesid="${messageId}"]`);
+      if (messageElement) attachMessageStashButton(messageElement);
     });
   }
 
-  function scheduleMessageButtonScan() {
-    if (messageButtonScanTimer) return;
+  function scheduleMessageButtonScan(delay = 40) {
+    if (messageButtonScanTimer) clearTimeout(messageButtonScanTimer);
     messageButtonScanTimer = setTimeout(() => {
       messageButtonScanTimer = null;
       injectMessageStashButtons();
-    }, 80);
+    }, delay);
   }
 
   function installMessageStashButtons() {
@@ -571,11 +603,20 @@
     doc.addEventListener('click', messageButtonClickHandler, true);
     injectMessageStashButtons();
 
-    const target = doc.getElementById('chat') || doc.body;
-    const Observer = getHostWindow().MutationObserver || window.MutationObserver;
-    if (target && Observer) {
-      messageButtonObserver = new Observer(scheduleMessageButtonScan);
-      messageButtonObserver.observe(target, { childList: true, subtree: true });
+    const context = getTavernContext();
+    const source = context && context.eventSource;
+    const events = context && context.eventTypes;
+    if (source && events && typeof source.on === 'function') {
+      const bind = (eventName, delay) => {
+        if (!eventName) return;
+        const handler = () => scheduleMessageButtonScan(delay);
+        source.on(eventName, handler);
+        messageButtonEventBindings.push({ source, eventName, handler });
+      };
+      bind(events.CHARACTER_MESSAGE_RENDERED, 20);
+      bind(events.CHAT_CHANGED, 120);
+      bind(events.MORE_MESSAGES_LOADED, 80);
+      bind(events.MESSAGE_DELETED, 40);
     }
   }
 
