@@ -1,14 +1,14 @@
 // == TavernHelper Script ==
 // name: 分支页面暂存器
 // author: Codex
-// version: v0.39
+// version: v0.40
 // description: 将未读分支页面原文保存到指定世界书的关闭条目中，并在酒馆助手面板内按当前酒馆渲染规则预览。
 
 (function () {
   'use strict';
 
   const SCRIPT_NAME = '分支页面暂存器';
-  const SCRIPT_VERSION = 'v0.39';
+  const SCRIPT_VERSION = 'v0.40';
   const BUTTON_NAME = '分支暂存';
   const GLOBAL_INSTANCE_KEY = '__th_branch_page_stash_instance_v1__';
   const INSTANCE_ID = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
@@ -658,9 +658,9 @@
   function getHostMessageTextStyle() {
     const host = getHostWindow();
     const doc = getHostDocument();
-    const node = doc.querySelector('#chat .mes[is_user="false"] .mes_text')
-      || doc.querySelector('#chat .mes_text')
-      || doc.body;
+    const aiMessages = Array.from(doc.querySelectorAll('#chat .mes[is_user="false"] .mes_text'));
+    const container = aiMessages[aiMessages.length - 1] || doc.querySelector('#chat .mes_text') || doc.body;
+    const node = container && container.querySelector && container.querySelector(':scope > p') || container;
     try {
       const style = host.getComputedStyle(node);
       return {
@@ -671,15 +671,72 @@
         color: style.color,
         letterSpacing: style.letterSpacing,
         textAlign: style.textAlign,
+        fontStylesheetUrls: getHostFontStylesheetUrls(),
       };
     } catch (error) {
       return {};
     }
   }
 
+  function isLikelyFontStylesheetUrl(value) {
+    try {
+      const url = new URL(String(value || ''), getHostDocument().baseURI);
+      return /(?:font|typekit|zeoseven|googleapis)/i.test(`${url.hostname}${url.pathname}`);
+    } catch (error) {
+      return false;
+    }
+  }
+
+  function getHostFontStylesheetUrls() {
+    const doc = getHostDocument();
+    const urls = new Set();
+    const addUrl = (value) => {
+      try {
+        const url = new URL(String(value || ''), doc.baseURI).href;
+        if (isLikelyFontStylesheetUrl(url)) urls.add(url);
+      } catch (error) {
+        // Ignore malformed stylesheet URLs.
+      }
+    };
+    doc.querySelectorAll('link[rel~="stylesheet"][href]').forEach((link) => addUrl(link.href));
+    doc.querySelectorAll('style').forEach((style) => {
+      const text = String(style.textContent || '');
+      const importPattern = /@import\s+(?:url\(\s*)?["']?([^"')\s;]+)["']?\s*\)?[^;]*;/gi;
+      for (const match of text.matchAll(importPattern)) addUrl(match[1]);
+    });
+    Array.from(doc.styleSheets || []).forEach((sheet) => {
+      try {
+        Array.from(sheet.cssRules || []).forEach((rule) => {
+          if (rule && rule.href) addUrl(rule.href);
+        });
+      } catch (error) {
+        // Cross-origin stylesheets may block CSS rule inspection.
+      }
+    });
+    return Array.from(urls);
+  }
+
   function cleanComputedCssValue(value, fallback) {
     const cleaned = String(value || '').replace(/[{};<>]/g, '').trim();
     return cleaned || fallback;
+  }
+
+  function renderIsolatedProseBlocks(value) {
+    const text = cleanMarkdownFenceLines(value).trim();
+    if (!text) return '';
+    if (/<(?:p|div|section|article|blockquote|pre|table|ul|ol)\b/i.test(text)) {
+      return preserveParagraphsInHtml(text);
+    }
+    const containsMarkup = /<[A-Za-z][^>]*>/.test(text);
+    return text
+      .split(/(?:\r?\n\s*){2,}|(?:\s*<br\s*\/?\s*>\s*){2,}/gi)
+      .map((block) => block.trim())
+      .filter(Boolean)
+      .map((block) => {
+        const content = containsMarkup ? block : escapeHtml(block);
+        return `<p>${content.replace(/\r?\n/g, '<br>')}</p>`;
+      })
+      .join('');
   }
 
   function prepareIsolatedPreviewDocument(html, messageStyle) {
@@ -689,10 +746,21 @@
     const prefix = source.slice(0, documentStart).trim();
     if (!prefix) return source.slice(documentStart);
     const documentSource = source.slice(documentStart);
-    const prefixHtml = /<(?:p|div|br|blockquote|em|strong|span)\b/i.test(prefix)
-      ? preserveParagraphsInHtml(prefix)
-      : renderPlainTextBlocks(prefix);
+    const prefixHtml = renderIsolatedProseBlocks(prefix);
     const style = messageStyle || {};
+    const fontLinks = Array.from(new Set(style.fontStylesheetUrls || []))
+      .map((url) => `<link rel="stylesheet" href="${escapeAttr(url)}">`)
+      .join('');
+    let preparedDocument = documentSource;
+    if (fontLinks) {
+      if (/<\/head\s*>/i.test(preparedDocument)) {
+        preparedDocument = preparedDocument.replace(/<\/head\s*>/i, `${fontLinks}</head>`);
+      } else if (/<html\b[^>]*>/i.test(preparedDocument)) {
+        preparedDocument = preparedDocument.replace(/<html\b[^>]*>/i, (htmlTag) => `${htmlTag}<head>${fontLinks}</head>`);
+      } else {
+        preparedDocument = `${fontLinks}${preparedDocument}`;
+      }
+    }
     const proseCss = `
       <style data-th-branch-document-prose-style>
         [data-th-branch-document-prose] {
@@ -721,10 +789,10 @@
         }
       </style>`;
     const prose = `${proseCss}<div data-th-branch-document-prose>${prefixHtml}</div>`;
-    if (/<body\b[^>]*>/i.test(documentSource)) {
-      return documentSource.replace(/<body\b[^>]*>/i, (bodyTag) => `${bodyTag}${prose}`);
+    if (/<body\b[^>]*>/i.test(preparedDocument)) {
+      return preparedDocument.replace(/<body\b[^>]*>/i, (bodyTag) => `${bodyTag}${prose}`);
     }
-    return `${prose}${documentSource}`;
+    return `${prose}${preparedDocument}`;
   }
 
   function buildIsolatedPreviewDocument(html, frameId, messageStyle) {
@@ -751,6 +819,7 @@
           };
           document.addEventListener('DOMContentLoaded', reportHeight);
           window.addEventListener('load', reportHeight);
+          if (document.fonts && document.fonts.ready) document.fonts.ready.then(reportHeight);
           if (typeof ResizeObserver === 'function') {
             const observer = new ResizeObserver(reportHeight);
             if (document.body) observer.observe(document.body);
