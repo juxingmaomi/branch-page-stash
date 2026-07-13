@@ -1,6 +1,6 @@
 (async () => {
   const REPO = 'YOUR_GITHUB_USERNAME/branch-page-stash';
-  const VERSION = 'v0.37';
+  const VERSION = 'v0.38';
   const URL = `https://gcore.jsdelivr.net/gh/${REPO}@${VERSION}/index.js`;
 
   const loaderState = {

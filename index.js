@@ -1,14 +1,14 @@
 // == TavernHelper Script ==
 // name: 分支页面暂存器
 // author: Codex
-// version: v0.37
+// version: v0.38
 // description: 将未读分支页面原文保存到指定世界书的关闭条目中，并在酒馆助手面板内按当前酒馆渲染规则预览。
 
 (function () {
   'use strict';
 
   const SCRIPT_NAME = '分支页面暂存器';
-  const SCRIPT_VERSION = 'v0.37';
+  const SCRIPT_VERSION = 'v0.38';
   const BUTTON_NAME = '分支暂存';
   const GLOBAL_INSTANCE_KEY = '__th_branch_page_stash_instance_v1__';
   const INSTANCE_ID = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
@@ -655,6 +655,23 @@
     };
   }
 
+  function prepareIsolatedPreviewDocument(html) {
+    const source = cleanMarkdownFenceLines(html).trim();
+    const documentStart = source.search(/(?:<!doctype\s+html|<html\b)/i);
+    if (documentStart <= 0) return source;
+    const prefix = source.slice(0, documentStart).trim();
+    if (!prefix) return source.slice(documentStart);
+    const documentSource = source.slice(documentStart);
+    const prefixHtml = /<(?:p|div|br|blockquote|em|strong|span)\b/i.test(prefix)
+      ? preserveParagraphsInHtml(prefix)
+      : renderPlainTextBlocks(prefix);
+    const prose = `<div data-th-branch-document-prose style="align-self:stretch;width:100%;box-sizing:border-box;text-align:left;white-space:normal;">${prefixHtml}</div>`;
+    if (/<body\b[^>]*>/i.test(documentSource)) {
+      return documentSource.replace(/<body\b[^>]*>/i, (bodyTag) => `${bodyTag}${prose}`);
+    }
+    return `${prose}${documentSource}`;
+  }
+
   function buildIsolatedPreviewDocument(html, frameId) {
     const bridge = `
       <script>
@@ -689,7 +706,7 @@
           [0, 120, 350, 900].forEach((delay) => setTimeout(reportHeight, delay));
         })();
       <\/script>`;
-    const source = String(html || '');
+    const source = prepareIsolatedPreviewDocument(html);
     if (/<\/body\s*>/i.test(source)) {
       return source.replace(/<\/body\s*>(?![\s\S]*<\/body\s*>)/i, `${bridge}</body>`);
     }
