@@ -1,14 +1,14 @@
 // == TavernHelper Script ==
 // name: 分支页面暂存器
 // author: Codex
-// version: v0.41
+// version: v0.42
 // description: 将未读分支页面原文保存到指定世界书的关闭条目中，并在酒馆助手面板内按当前酒馆渲染规则预览。
 
 (function () {
   'use strict';
 
   const SCRIPT_NAME = '分支页面暂存器';
-  const SCRIPT_VERSION = 'v0.41';
+  const SCRIPT_VERSION = 'v0.42';
   const BUTTON_NAME = '分支暂存';
   const GLOBAL_INSTANCE_KEY = '__th_branch_page_stash_instance_v1__';
   const INSTANCE_ID = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
@@ -1270,11 +1270,22 @@
       .th-branch-preview-card p:last-child {
         margin-bottom: 0;
       }
-      .th-branch-host-prose {
-        margin-bottom: 18px;
+      .th-branch-host-prose-shell {
+        max-width: 820px;
+        margin: 0 auto 18px;
+        padding: 18px;
+        border: 1px solid var(--th-branch-soft-border);
+        border-left: 5px solid var(--th-branch-accent);
+        border-radius: 6px;
+        background: var(--th-branch-card-bg);
+        overflow-wrap: anywhere;
       }
-      .th-branch-host-prose p {
-        text-indent: 2em;
+      .th-branch-host-prose {
+        min-width: 0;
+        margin: 0;
+      }
+      .th-branch-host-prose > :last-child {
+        margin-bottom: 0;
       }
       .th-branch-preview-card :where(img, video, iframe) {
         max-width: 100%;
@@ -2092,7 +2103,7 @@
     const cardClass = result.prose ? 'th-branch-preview-card th-branch-prose' : 'th-branch-preview-card';
     const frameId = result.isolated ? makeId() : '';
     const previewHtml = result.isolated
-      ? `${result.proseHtml ? `<div class="th-branch-preview-card th-branch-host-prose">${result.proseHtml}</div>` : ''}<div class="th-branch-preview-document"><iframe class="th-branch-preview-document-frame" data-preview-frame-id="${escapeAttr(frameId)}" title="${escapeAttr(safeTitle)}" sandbox="allow-scripts"></iframe></div>`
+      ? `${result.proseHtml ? `<div class="th-branch-host-prose-shell" is_user="false"><div class="th-branch-host-prose mes_text">${result.proseHtml}</div></div>` : ''}<div class="th-branch-preview-document"><iframe class="th-branch-preview-document-frame" data-preview-frame-id="${escapeAttr(frameId)}" title="${escapeAttr(safeTitle)}" sandbox="allow-scripts"></iframe></div>`
       : `<div class="${cardClass}">${result.html}</div>`;
     const readerBottomHtml = buildReaderBottomHtml($panel);
     $panel.find('[data-preview]').html(`
