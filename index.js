@@ -1,14 +1,14 @@
 // == TavernHelper Script ==
 // name: 分支页面暂存器
 // author: Codex
-// version: v0.42
+// version: v0.43
 // description: 将未读分支页面原文保存到指定世界书的关闭条目中，并在酒馆助手面板内按当前酒馆渲染规则预览。
 
 (function () {
   'use strict';
 
   const SCRIPT_NAME = '分支页面暂存器';
-  const SCRIPT_VERSION = 'v0.42';
+  const SCRIPT_VERSION = 'v0.43';
   const BUTTON_NAME = '分支暂存';
   const GLOBAL_INSTANCE_KEY = '__th_branch_page_stash_instance_v1__';
   const INSTANCE_ID = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
@@ -20,6 +20,9 @@
   const ENTRY_PREFIX = '[分支暂存] ';
   const EXTRA_KEY = 'thBranchPageStash';
   const PREVIEW_FRAME_MESSAGE_TYPE = 'th-branch-stash-preview-height';
+  const MESSAGE_STASH_ROW_CLASS = 'th-branch-message-stash-row';
+  const MESSAGE_STASH_BUTTON_CLASS = 'th-branch-message-stash-button';
+  const MESSAGE_MARKER_FOOTER_CLASS = 'th-message-marker-footer';
   let floatingButtonPosition = null;
   let minimizedButtonPosition = null;
   let floatingGuardObserver = null;
@@ -27,6 +30,9 @@
   let floatingRepairTimer = null;
   let bootRetryTimer = null;
   let previewFrameMessageHandler = null;
+  let messageButtonObserver = null;
+  let messageButtonScanTimer = null;
+  let messageButtonClickHandler = null;
   let stoppingInstance = false;
 
   const DEFAULT_SETTINGS = {
@@ -100,10 +106,28 @@
     }
   }
 
+  function clearMessageStashButtons() {
+    const doc = getHostDocument();
+    if (messageButtonScanTimer) {
+      clearTimeout(messageButtonScanTimer);
+      messageButtonScanTimer = null;
+    }
+    if (messageButtonObserver) {
+      messageButtonObserver.disconnect();
+      messageButtonObserver = null;
+    }
+    if (messageButtonClickHandler) {
+      doc.removeEventListener('click', messageButtonClickHandler, true);
+      messageButtonClickHandler = null;
+    }
+    doc.querySelectorAll(`.${MESSAGE_STASH_BUTTON_CLASS}, .${MESSAGE_STASH_ROW_CLASS}`).forEach((node) => node.remove());
+  }
+
   function stopInstance() {
     if (stoppingInstance) return;
     stoppingInstance = true;
     clearFloatingButtonGuard();
+    clearMessageStashButtons();
     removeOwnedDom();
     const host = getHostWindow();
     if (previewFrameMessageHandler) {
@@ -400,6 +424,159 @@
     const result = await callHelper('createWorldbookEntries', worldbookName, [payload], { render: 'debounced' });
     const entry = result && result.new_entries && result.new_entries[0];
     return entry || payload;
+  }
+
+  function getTavernContext() {
+    const host = getHostWindow();
+    const api = host.SillyTavern || window.SillyTavern;
+    if (api && typeof api.getContext === 'function') return api.getContext();
+    return null;
+  }
+
+  function getRawMessage(messageId) {
+    const context = getTavernContext();
+    const message = context && Array.isArray(context.chat) ? context.chat[messageId] : null;
+    if (!message || typeof message.mes !== 'string') {
+      throw new Error(`没有找到第 ${messageId} 层的原文`);
+    }
+    return message;
+  }
+
+  function normalizeSceneTitle(value) {
+    const template = getHostDocument().createElement('template');
+    template.innerHTML = String(value || '');
+    return String(template.content.textContent || '').replace(/\s+/g, ' ').trim();
+  }
+
+  function getMessageTitle(raw, messageId) {
+    const pattern = /<Scene_Title\b[^>]*>([\s\S]*?)<\/Scene_Title\s*>/gi;
+    for (const match of String(raw || '').matchAll(pattern)) {
+      const title = normalizeSceneTitle(match[1]);
+      if (title) return title;
+    }
+    return `第 ${messageId} 层`;
+  }
+
+  function isGenerationInProgress(messageId) {
+    const context = getTavernContext();
+    const processor = context && context.streamingProcessor;
+    return Boolean(processor && !processor.isFinished && Number(messageId) === Number(context.chat.length - 1));
+  }
+
+  async function saveMessageToStash(messageId, button) {
+    if (button.dataset.saving === 'true') return;
+    if (isGenerationInProgress(messageId)) {
+      notify('info', '这一层还在生成，请生成完成后再暂存');
+      return;
+    }
+
+    const settings = loadSettings();
+    const worldbookName = sanitizeWorldbookName(settings.worldbookName);
+    if (!worldbookName) throw new Error('请先在分支页面暂存器中选择世界书');
+
+    const message = getRawMessage(messageId);
+    const raw = message.mes;
+    if (!raw.trim()) throw new Error(`第 ${messageId} 层没有可保存的内容`);
+    const title = getMessageTitle(raw, messageId);
+
+    button.dataset.saving = 'true';
+    button.disabled = true;
+    button.innerHTML = '<i class="fa-solid fa-spinner fa-spin" aria-hidden="true"></i><span>保存中</span>';
+    try {
+      const entry = await createStashEntry(worldbookName, title, raw);
+      settings.lastSelectedUid = entry && entry.uid || settings.lastSelectedUid;
+      saveSettings(settings);
+
+      const panel = getHostDocument().querySelector('.th-branch-panel');
+      const $ = get$();
+      if (panel && $) await refreshWorldbookOptions($(panel));
+      notify('success', `已将「${title}」保存到「${worldbookName}」`);
+    } finally {
+      button.dataset.saving = 'false';
+      button.disabled = false;
+      button.innerHTML = '<i class="fa-solid fa-box-archive" aria-hidden="true"></i><span>暂存本层</span>';
+    }
+  }
+
+  function isAssistantMessageElement(messageElement) {
+    const messageId = Number(messageElement && messageElement.getAttribute('mesid'));
+    if (!Number.isInteger(messageId) || messageId < 0) return false;
+    try {
+      const message = getRawMessage(messageId);
+      return !message.is_user && !message.is_system;
+    } catch (error) {
+      return messageElement.getAttribute('is_user') === 'false' && messageElement.getAttribute('is_system') !== 'true';
+    }
+  }
+
+  function injectMessageStashButtons() {
+    const doc = getHostDocument();
+    doc.querySelectorAll('#chat .mes').forEach((messageElement) => {
+      if (!isAssistantMessageElement(messageElement)) return;
+      const messageBlock = messageElement.querySelector('.mes_block');
+      if (!messageBlock) return;
+
+      let button = messageBlock.querySelector(`.${MESSAGE_STASH_BUTTON_CLASS}`);
+      if (!button) {
+        button = doc.createElement('button');
+        button.type = 'button';
+        button.className = MESSAGE_STASH_BUTTON_CLASS;
+        button.title = '将这一层的完整原文保存到分支页面暂存器';
+        button.setAttribute('aria-label', '暂存本层完整原文');
+        button.innerHTML = '<i class="fa-solid fa-box-archive" aria-hidden="true"></i><span>暂存本层</span>';
+      }
+
+      const markerFooter = Array.from(messageBlock.children).find((child) => child.classList && child.classList.contains(MESSAGE_MARKER_FOOTER_CLASS));
+      if (markerFooter) {
+        const fallbackRow = button.closest(`.${MESSAGE_STASH_ROW_CLASS}`);
+        markerFooter.insertBefore(button, markerFooter.firstChild);
+        if (fallbackRow) fallbackRow.remove();
+        return;
+      }
+
+      let row = Array.from(messageBlock.children).find((child) => child.classList && child.classList.contains(MESSAGE_STASH_ROW_CLASS));
+      if (!row) {
+        row = doc.createElement('div');
+        row.className = MESSAGE_STASH_ROW_CLASS;
+        messageBlock.appendChild(row);
+      }
+      if (button.parentElement !== row) row.appendChild(button);
+    });
+  }
+
+  function scheduleMessageButtonScan() {
+    if (messageButtonScanTimer) return;
+    messageButtonScanTimer = setTimeout(() => {
+      messageButtonScanTimer = null;
+      injectMessageStashButtons();
+    }, 80);
+  }
+
+  function installMessageStashButtons() {
+    clearMessageStashButtons();
+    const doc = getHostDocument();
+    messageButtonClickHandler = (event) => {
+      const button = event.target && event.target.closest && event.target.closest(`.${MESSAGE_STASH_BUTTON_CLASS}`);
+      if (!button) return;
+      const messageElement = button.closest('.mes');
+      const messageId = Number(messageElement && messageElement.getAttribute('mesid'));
+      if (!Number.isInteger(messageId)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      saveMessageToStash(messageId, button).catch((error) => {
+        console.error(error);
+        notify('error', `暂存失败：${error.message || error}`);
+      });
+    };
+    doc.addEventListener('click', messageButtonClickHandler, true);
+    injectMessageStashButtons();
+
+    const target = doc.getElementById('chat') || doc.body;
+    const Observer = getHostWindow().MutationObserver || window.MutationObserver;
+    if (target && Observer) {
+      messageButtonObserver = new Observer(scheduleMessageButtonScan);
+      messageButtonObserver.observe(target, { childList: true, subtree: true });
+    }
   }
 
   async function updateStashEntry(worldbookName, uid, title, raw) {
@@ -1270,22 +1447,11 @@
       .th-branch-preview-card p:last-child {
         margin-bottom: 0;
       }
-      .th-branch-host-prose-shell {
-        max-width: 820px;
-        margin: 0 auto 18px;
-        padding: 18px;
-        border: 1px solid var(--th-branch-soft-border);
-        border-left: 5px solid var(--th-branch-accent);
-        border-radius: 6px;
-        background: var(--th-branch-card-bg);
-        overflow-wrap: anywhere;
-      }
       .th-branch-host-prose {
-        min-width: 0;
-        margin: 0;
+        margin-bottom: 18px;
       }
-      .th-branch-host-prose > :last-child {
-        margin-bottom: 0;
+      .th-branch-host-prose p {
+        text-indent: 2em;
       }
       .th-branch-preview-card :where(img, video, iframe) {
         max-width: 100%;
@@ -1313,7 +1479,49 @@
         text-align: center;
         padding: 40px 10px;
       }
+      .${MESSAGE_STASH_ROW_CLASS} {
+        display: flex;
+        align-items: center;
+        justify-content: flex-start;
+        width: 100%;
+        min-height: 34px;
+        margin-top: 8px;
+        padding: 3px 8px 3px 0;
+        box-sizing: border-box;
+      }
+      .${MESSAGE_STASH_BUTTON_CLASS} {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 6px;
+        height: 28px;
+        min-height: 28px;
+        padding: 0 9px;
+        border: 1px solid var(--SmartThemeBorderColor, rgba(128, 128, 128, 0.45));
+        border-radius: 6px;
+        background: var(--black30a, rgba(0, 0, 0, 0.18));
+        color: var(--SmartThemeBodyColor, inherit);
+        font: inherit;
+        font-size: 12px;
+        line-height: 1;
+        cursor: pointer;
+      }
+      .${MESSAGE_MARKER_FOOTER_CLASS} > .${MESSAGE_STASH_BUTTON_CLASS} {
+        margin-right: auto;
+      }
+      .${MESSAGE_STASH_BUTTON_CLASS}:hover {
+        filter: brightness(1.12);
+      }
+      .${MESSAGE_STASH_BUTTON_CLASS}:disabled {
+        cursor: wait;
+        opacity: 0.6;
+      }
       @media (max-width: 820px) {
+        .${MESSAGE_STASH_BUTTON_CLASS} {
+          height: 32px;
+          min-height: 32px;
+          padding: 0 10px;
+        }
         .th-branch-overlay {
           display: block;
           padding: 0;
@@ -2103,7 +2311,7 @@
     const cardClass = result.prose ? 'th-branch-preview-card th-branch-prose' : 'th-branch-preview-card';
     const frameId = result.isolated ? makeId() : '';
     const previewHtml = result.isolated
-      ? `${result.proseHtml ? `<div class="th-branch-host-prose-shell" is_user="false"><div class="th-branch-host-prose mes_text">${result.proseHtml}</div></div>` : ''}<div class="th-branch-preview-document"><iframe class="th-branch-preview-document-frame" data-preview-frame-id="${escapeAttr(frameId)}" title="${escapeAttr(safeTitle)}" sandbox="allow-scripts"></iframe></div>`
+      ? `${result.proseHtml ? `<div class="th-branch-preview-card th-branch-host-prose">${result.proseHtml}</div>` : ''}<div class="th-branch-preview-document"><iframe class="th-branch-preview-document-frame" data-preview-frame-id="${escapeAttr(frameId)}" title="${escapeAttr(safeTitle)}" sandbox="allow-scripts"></iframe></div>`
       : `<div class="${cardClass}">${result.html}</div>`;
     const readerBottomHtml = buildReaderBottomHtml($panel);
     $panel.find('[data-preview]').html(`
@@ -2619,10 +2827,12 @@
       }
       injectFallbackButton();
       installFloatingButtonGuard();
+      installMessageStashButtons();
     } catch (error) {
       console.warn(`[${SCRIPT_NAME}] 注册按钮失败，使用浮动按钮`, error);
       injectFallbackButton();
       installFloatingButtonGuard();
+      installMessageStashButtons();
     }
   }
 
