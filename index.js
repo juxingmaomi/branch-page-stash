@@ -1,14 +1,14 @@
 // == TavernHelper Script ==
 // name: 分支页面暂存器
 // author: Codex
-// version: v0.40
+// version: v0.41
 // description: 将未读分支页面原文保存到指定世界书的关闭条目中，并在酒馆助手面板内按当前酒馆渲染规则预览。
 
 (function () {
   'use strict';
 
   const SCRIPT_NAME = '分支页面暂存器';
-  const SCRIPT_VERSION = 'v0.40';
+  const SCRIPT_VERSION = 'v0.41';
   const BUTTON_NAME = '分支暂存';
   const GLOBAL_INSTANCE_KEY = '__th_branch_page_stash_instance_v1__';
   const INSTANCE_ID = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
@@ -644,88 +644,37 @@
   function renderRawResult(raw) {
     const rendered = renderRawToHtml(raw);
     const isolated = shouldUseIsolatedPreview(rendered);
+    const parts = isolated ? splitIsolatedPreviewContent(rendered) : null;
     const html = isolated
-      ? cleanMarkdownFenceLines(rendered).trim()
+      ? parts.documentHtml
       : stripMarkdownFenceBlocks(preserveParagraphsInHtml(rendered));
+    const proseHtml = isolated && parts.prose
+      ? renderHostProseBlocks(parts.prose)
+      : '';
     return {
       html,
-      warnings: makeRenderWarnings(raw, html),
+      proseHtml,
+      warnings: makeRenderWarnings(raw, `${proseHtml}${html}`),
       prose: isMostlyProseHtml(html),
       isolated,
     };
   }
 
-  function getHostMessageTextStyle() {
-    const host = getHostWindow();
-    const doc = getHostDocument();
-    const aiMessages = Array.from(doc.querySelectorAll('#chat .mes[is_user="false"] .mes_text'));
-    const container = aiMessages[aiMessages.length - 1] || doc.querySelector('#chat .mes_text') || doc.body;
-    const node = container && container.querySelector && container.querySelector(':scope > p') || container;
-    try {
-      const style = host.getComputedStyle(node);
-      return {
-        fontFamily: style.fontFamily,
-        fontSize: style.fontSize,
-        fontWeight: style.fontWeight,
-        lineHeight: style.lineHeight,
-        color: style.color,
-        letterSpacing: style.letterSpacing,
-        textAlign: style.textAlign,
-        fontStylesheetUrls: getHostFontStylesheetUrls(),
-      };
-    } catch (error) {
-      return {};
-    }
-  }
-
-  function isLikelyFontStylesheetUrl(value) {
-    try {
-      const url = new URL(String(value || ''), getHostDocument().baseURI);
-      return /(?:font|typekit|zeoseven|googleapis)/i.test(`${url.hostname}${url.pathname}`);
-    } catch (error) {
-      return false;
-    }
-  }
-
-  function getHostFontStylesheetUrls() {
-    const doc = getHostDocument();
-    const urls = new Set();
-    const addUrl = (value) => {
-      try {
-        const url = new URL(String(value || ''), doc.baseURI).href;
-        if (isLikelyFontStylesheetUrl(url)) urls.add(url);
-      } catch (error) {
-        // Ignore malformed stylesheet URLs.
-      }
+  function splitIsolatedPreviewContent(value) {
+    const source = cleanMarkdownFenceLines(value).trim();
+    const documentStart = source.search(/(?:<!doctype\s+html|<html\b)/i);
+    if (documentStart < 0) return { prose: '', documentHtml: source };
+    return {
+      prose: source.slice(0, documentStart).trim(),
+      documentHtml: source.slice(documentStart).trim(),
     };
-    doc.querySelectorAll('link[rel~="stylesheet"][href]').forEach((link) => addUrl(link.href));
-    doc.querySelectorAll('style').forEach((style) => {
-      const text = String(style.textContent || '');
-      const importPattern = /@import\s+(?:url\(\s*)?["']?([^"')\s;]+)["']?\s*\)?[^;]*;/gi;
-      for (const match of text.matchAll(importPattern)) addUrl(match[1]);
-    });
-    Array.from(doc.styleSheets || []).forEach((sheet) => {
-      try {
-        Array.from(sheet.cssRules || []).forEach((rule) => {
-          if (rule && rule.href) addUrl(rule.href);
-        });
-      } catch (error) {
-        // Cross-origin stylesheets may block CSS rule inspection.
-      }
-    });
-    return Array.from(urls);
   }
 
-  function cleanComputedCssValue(value, fallback) {
-    const cleaned = String(value || '').replace(/[{};<>]/g, '').trim();
-    return cleaned || fallback;
-  }
-
-  function renderIsolatedProseBlocks(value) {
+  function renderHostProseBlocks(value) {
     const text = cleanMarkdownFenceLines(value).trim();
     if (!text) return '';
     if (/<(?:p|div|section|article|blockquote|pre|table|ul|ol)\b/i.test(text)) {
-      return preserveParagraphsInHtml(text);
+      return stripMarkdownFenceBlocks(preserveParagraphsInHtml(text));
     }
     const containsMarkup = /<[A-Za-z][^>]*>/.test(text);
     return text
@@ -739,63 +688,7 @@
       .join('');
   }
 
-  function prepareIsolatedPreviewDocument(html, messageStyle) {
-    const source = cleanMarkdownFenceLines(html).trim();
-    const documentStart = source.search(/(?:<!doctype\s+html|<html\b)/i);
-    if (documentStart <= 0) return source;
-    const prefix = source.slice(0, documentStart).trim();
-    if (!prefix) return source.slice(documentStart);
-    const documentSource = source.slice(documentStart);
-    const prefixHtml = renderIsolatedProseBlocks(prefix);
-    const style = messageStyle || {};
-    const fontLinks = Array.from(new Set(style.fontStylesheetUrls || []))
-      .map((url) => `<link rel="stylesheet" href="${escapeAttr(url)}">`)
-      .join('');
-    let preparedDocument = documentSource;
-    if (fontLinks) {
-      if (/<\/head\s*>/i.test(preparedDocument)) {
-        preparedDocument = preparedDocument.replace(/<\/head\s*>/i, `${fontLinks}</head>`);
-      } else if (/<html\b[^>]*>/i.test(preparedDocument)) {
-        preparedDocument = preparedDocument.replace(/<html\b[^>]*>/i, (htmlTag) => `${htmlTag}<head>${fontLinks}</head>`);
-      } else {
-        preparedDocument = `${fontLinks}${preparedDocument}`;
-      }
-    }
-    const proseCss = `
-      <style data-th-branch-document-prose-style>
-        [data-th-branch-document-prose] {
-          align-self: stretch;
-          width: 100%;
-          box-sizing: border-box;
-          white-space: normal;
-          font-family: ${cleanComputedCssValue(style.fontFamily, 'serif')} !important;
-          font-size: ${cleanComputedCssValue(style.fontSize, '1rem')} !important;
-          font-weight: ${cleanComputedCssValue(style.fontWeight, '400')} !important;
-          line-height: ${cleanComputedCssValue(style.lineHeight, '1.8')} !important;
-          color: ${cleanComputedCssValue(style.color, 'inherit')} !important;
-          letter-spacing: ${cleanComputedCssValue(style.letterSpacing, 'normal')} !important;
-          text-align: ${cleanComputedCssValue(style.textAlign, 'left')} !important;
-        }
-        [data-th-branch-document-prose] p {
-          margin: 0 0 1em !important;
-          text-indent: 2em !important;
-          font: inherit !important;
-          color: inherit !important;
-          letter-spacing: inherit !important;
-          text-align: inherit !important;
-        }
-        [data-th-branch-document-prose] p:last-child {
-          margin-bottom: 0 !important;
-        }
-      </style>`;
-    const prose = `${proseCss}<div data-th-branch-document-prose>${prefixHtml}</div>`;
-    if (/<body\b[^>]*>/i.test(preparedDocument)) {
-      return preparedDocument.replace(/<body\b[^>]*>/i, (bodyTag) => `${bodyTag}${prose}`);
-    }
-    return `${prose}${preparedDocument}`;
-  }
-
-  function buildIsolatedPreviewDocument(html, frameId, messageStyle) {
+  function buildIsolatedPreviewDocument(html, frameId) {
     const bridge = `
       <script>
         (() => {
@@ -819,7 +712,6 @@
           };
           document.addEventListener('DOMContentLoaded', reportHeight);
           window.addEventListener('load', reportHeight);
-          if (document.fonts && document.fonts.ready) document.fonts.ready.then(reportHeight);
           if (typeof ResizeObserver === 'function') {
             const observer = new ResizeObserver(reportHeight);
             if (document.body) observer.observe(document.body);
@@ -830,7 +722,7 @@
           [0, 120, 350, 900].forEach((delay) => setTimeout(reportHeight, delay));
         })();
       <\/script>`;
-    const source = prepareIsolatedPreviewDocument(html, messageStyle);
+    const source = cleanMarkdownFenceLines(html).trim();
     if (/<\/body\s*>/i.test(source)) {
       return source.replace(/<\/body\s*>(?![\s\S]*<\/body\s*>)/i, `${bridge}</body>`);
     }
@@ -1377,6 +1269,12 @@
       }
       .th-branch-preview-card p:last-child {
         margin-bottom: 0;
+      }
+      .th-branch-host-prose {
+        margin-bottom: 18px;
+      }
+      .th-branch-host-prose p {
+        text-indent: 2em;
       }
       .th-branch-preview-card :where(img, video, iframe) {
         max-width: 100%;
@@ -2194,7 +2092,7 @@
     const cardClass = result.prose ? 'th-branch-preview-card th-branch-prose' : 'th-branch-preview-card';
     const frameId = result.isolated ? makeId() : '';
     const previewHtml = result.isolated
-      ? `<div class="th-branch-preview-document"><iframe class="th-branch-preview-document-frame" data-preview-frame-id="${escapeAttr(frameId)}" title="${escapeAttr(safeTitle)}" sandbox="allow-scripts"></iframe></div>`
+      ? `${result.proseHtml ? `<div class="th-branch-preview-card th-branch-host-prose">${result.proseHtml}</div>` : ''}<div class="th-branch-preview-document"><iframe class="th-branch-preview-document-frame" data-preview-frame-id="${escapeAttr(frameId)}" title="${escapeAttr(safeTitle)}" sandbox="allow-scripts"></iframe></div>`
       : `<div class="${cardClass}">${result.html}</div>`;
     const readerBottomHtml = buildReaderBottomHtml($panel);
     $panel.find('[data-preview]').html(`
@@ -2213,7 +2111,7 @@
     if (result.isolated) {
       ensurePreviewFrameMessageHandler();
       const frame = $panel.find(`.th-branch-preview-document-frame[data-preview-frame-id="${frameId}"]`)[0];
-      if (frame) frame.srcdoc = buildIsolatedPreviewDocument(result.html, frameId, getHostMessageTextStyle());
+      if (frame) frame.srcdoc = buildIsolatedPreviewDocument(result.html, frameId);
     }
   }
 
