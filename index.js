@@ -1,14 +1,14 @@
 // == TavernHelper Script ==
 // name: 分支页面暂存器
 // author: Codex
-// version: v0.36
+// version: v0.37
 // description: 将未读分支页面原文保存到指定世界书的关闭条目中，并在酒馆助手面板内按当前酒馆渲染规则预览。
 
 (function () {
   'use strict';
 
   const SCRIPT_NAME = '分支页面暂存器';
-  const SCRIPT_VERSION = 'v0.36';
+  const SCRIPT_VERSION = 'v0.37';
   const BUTTON_NAME = '分支暂存';
   const GLOBAL_INSTANCE_KEY = '__th_branch_page_stash_instance_v1__';
   const INSTANCE_ID = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
@@ -19,12 +19,14 @@
   const MINIMIZED_BUTTON_ID = 'th-branch-stash-minimized-button';
   const ENTRY_PREFIX = '[分支暂存] ';
   const EXTRA_KEY = 'thBranchPageStash';
+  const PREVIEW_FRAME_MESSAGE_TYPE = 'th-branch-stash-preview-height';
   let floatingButtonPosition = null;
   let minimizedButtonPosition = null;
   let floatingGuardObserver = null;
   let floatingGuardTimers = [];
   let floatingRepairTimer = null;
   let bootRetryTimer = null;
+  let previewFrameMessageHandler = null;
   let stoppingInstance = false;
 
   const DEFAULT_SETTINGS = {
@@ -104,6 +106,10 @@
     clearFloatingButtonGuard();
     removeOwnedDom();
     const host = getHostWindow();
+    if (previewFrameMessageHandler) {
+      host.removeEventListener('message', previewFrameMessageHandler);
+      previewFrameMessageHandler = null;
+    }
     if (host[GLOBAL_INSTANCE_KEY] && host[GLOBAL_INSTANCE_KEY].instanceId === INSTANCE_ID) {
       delete host[GLOBAL_INSTANCE_KEY];
     }
@@ -604,6 +610,11 @@
     return variants.length ? variants[0].text : source;
   }
 
+  function shouldUseIsolatedPreview(value) {
+    const text = String(value || '');
+    return /<script\b/i.test(text) && /(?:<!doctype\s+html|<html\b|<head\b|<body\b)/i.test(text);
+  }
+
   function renderRawToHtml(raw) {
     let text = String(raw || '');
     const characterName = getCharacterName();
@@ -616,6 +627,7 @@
       console.warn(`[${SCRIPT_NAME}] 正则渲染失败`, error);
     }
     if (looksLikeRenderedHtml(text)) {
+      if (shouldUseIsolatedPreview(text)) return cleanMarkdownFenceLines(text).trim();
       return preserveParagraphsInHtml(text);
     }
     try {
@@ -630,12 +642,73 @@
   }
 
   function renderRawResult(raw) {
-    const html = stripMarkdownFenceBlocks(preserveParagraphsInHtml(renderRawToHtml(raw)));
+    const rendered = renderRawToHtml(raw);
+    const isolated = shouldUseIsolatedPreview(rendered);
+    const html = isolated
+      ? cleanMarkdownFenceLines(rendered).trim()
+      : stripMarkdownFenceBlocks(preserveParagraphsInHtml(rendered));
     return {
       html,
       warnings: makeRenderWarnings(raw, html),
       prose: isMostlyProseHtml(html),
+      isolated,
     };
+  }
+
+  function buildIsolatedPreviewDocument(html, frameId) {
+    const bridge = `
+      <script>
+        (() => {
+          const frameId = ${JSON.stringify(frameId)};
+          let scheduled = false;
+          const reportHeight = () => {
+            if (scheduled) return;
+            scheduled = true;
+            requestAnimationFrame(() => {
+              scheduled = false;
+              const body = document.body;
+              const root = document.documentElement;
+              const bodyHeight = body ? Math.ceil(body.getBoundingClientRect().height) : 0;
+              const rootHeight = root ? Math.ceil(root.getBoundingClientRect().height) : 0;
+              parent.postMessage({
+                type: '${PREVIEW_FRAME_MESSAGE_TYPE}',
+                frameId,
+                height: Math.max(120, bodyHeight, rootHeight),
+              }, '*');
+            });
+          };
+          document.addEventListener('DOMContentLoaded', reportHeight);
+          window.addEventListener('load', reportHeight);
+          if (typeof ResizeObserver === 'function') {
+            const observer = new ResizeObserver(reportHeight);
+            if (document.body) observer.observe(document.body);
+            else document.addEventListener('DOMContentLoaded', () => observer.observe(document.body), { once: true });
+          }
+          const mutationObserver = new MutationObserver(reportHeight);
+          mutationObserver.observe(document.documentElement, { attributes: true, childList: true, subtree: true });
+          [0, 120, 350, 900].forEach((delay) => setTimeout(reportHeight, delay));
+        })();
+      <\/script>`;
+    const source = String(html || '');
+    if (/<\/body\s*>/i.test(source)) {
+      return source.replace(/<\/body\s*>(?![\s\S]*<\/body\s*>)/i, `${bridge}</body>`);
+    }
+    return `${source}${bridge}`;
+  }
+
+  function ensurePreviewFrameMessageHandler() {
+    if (previewFrameMessageHandler) return;
+    const host = getHostWindow();
+    previewFrameMessageHandler = (event) => {
+      const data = event && event.data;
+      if (!data || data.type !== PREVIEW_FRAME_MESSAGE_TYPE || !data.frameId) return;
+      const frames = Array.from(getHostDocument().querySelectorAll('.th-branch-preview-document-frame'));
+      const frame = frames.find((item) => item.dataset.previewFrameId === String(data.frameId));
+      if (!frame || event.source !== frame.contentWindow) return;
+      const height = Math.max(120, Math.min(6000, Number(data.height) || 0));
+      frame.style.height = `${height}px`;
+    };
+    host.addEventListener('message', previewFrameMessageHandler);
   }
 
   function injectStyle() {
@@ -1164,10 +1237,26 @@
       .th-branch-preview-card p:last-child {
         margin-bottom: 0;
       }
-      .th-branch-preview-card img,
-      .th-branch-preview-card video,
-      .th-branch-preview-card iframe {
+      .th-branch-preview-card :where(img, video, iframe) {
         max-width: 100%;
+      }
+      .th-branch-preview-document {
+        width: 100%;
+        max-width: 820px;
+        margin: 0 auto;
+        overflow: hidden;
+        border: 1px solid var(--th-branch-soft-border);
+        border-left: 5px solid var(--th-branch-accent);
+        border-radius: 6px;
+        background: transparent;
+      }
+      .th-branch-preview-document-frame {
+        display: block;
+        width: 100%;
+        height: 240px;
+        min-height: 120px;
+        border: 0;
+        background: transparent;
       }
       .th-branch-preview-empty {
         color: var(--th-branch-muted);
@@ -1962,6 +2051,10 @@
       ? `<div class="th-branch-render-warning">${result.warnings.map(escapeHtml).join('<br>')}</div>`
       : '';
     const cardClass = result.prose ? 'th-branch-preview-card th-branch-prose' : 'th-branch-preview-card';
+    const frameId = result.isolated ? makeId() : '';
+    const previewHtml = result.isolated
+      ? `<div class="th-branch-preview-document"><iframe class="th-branch-preview-document-frame" data-preview-frame-id="${escapeAttr(frameId)}" title="${escapeAttr(safeTitle)}" sandbox="allow-scripts"></iframe></div>`
+      : `<div class="${cardClass}">${result.html}</div>`;
     const readerBottomHtml = buildReaderBottomHtml($panel);
     $panel.find('[data-preview]').html(`
       <div class="th-branch-readerbar">
@@ -1974,8 +2067,13 @@
         </div>
       </div>
       ${warningHtml}
-      <div class="${cardClass}">${result.html}</div>
+      ${previewHtml}
       ${readerBottomHtml}`);
+    if (result.isolated) {
+      ensurePreviewFrameMessageHandler();
+      const frame = $panel.find(`.th-branch-preview-document-frame[data-preview-frame-id="${frameId}"]`)[0];
+      if (frame) frame.srcdoc = buildIsolatedPreviewDocument(result.html, frameId);
+    }
   }
 
   function fillEditorFromEntry($panel, entry) {
