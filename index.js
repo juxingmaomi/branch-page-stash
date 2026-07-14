@@ -1,14 +1,14 @@
 // == TavernHelper Script ==
 // name: 分支页面暂存器
 // author: Codex
-// version: v0.45
+// version: v0.46
 // description: 将未读分支页面原文保存到指定世界书的关闭条目中，并在酒馆助手面板内按当前酒馆渲染规则预览。
 
 (function () {
   'use strict';
 
   const SCRIPT_NAME = '分支页面暂存器';
-  const SCRIPT_VERSION = 'v0.45';
+  const SCRIPT_VERSION = 'v0.46';
   const BUTTON_NAME = '分支暂存';
   const GLOBAL_INSTANCE_KEY = '__th_branch_page_stash_instance_v1__';
   const INSTANCE_ID = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
@@ -29,6 +29,8 @@
   let floatingGuardObserver = null;
   let floatingGuardTimers = [];
   let floatingRepairTimer = null;
+  let floatingButtonDragCleanup = null;
+  let floatingButtonDragTarget = null;
   let bootRetryTimer = null;
   let previewFrameMessageHandler = null;
   let messageButtonScanTimer = null;
@@ -91,6 +93,18 @@
     }
   }
 
+  function clearFloatingButtonDrag() {
+    if (typeof floatingButtonDragCleanup === 'function') {
+      try {
+        floatingButtonDragCleanup();
+      } catch (error) {
+        console.warn(`[${SCRIPT_NAME}] 清理悬浮按钮拖动监听失败`, error);
+      }
+    }
+    floatingButtonDragCleanup = null;
+    floatingButtonDragTarget = null;
+  }
+
   function removeOwnedDom() {
     const doc = getHostDocument();
     [WIDGET_ID, STYLE_ID, FLOATING_BUTTON_ID, MINIMIZED_BUTTON_ID].forEach((id) => {
@@ -132,6 +146,7 @@
     if (stoppingInstance) return;
     stoppingInstance = true;
     clearFloatingButtonGuard();
+    clearFloatingButtonDrag();
     clearMessageStashButtons();
     removeOwnedDom();
     const host = getHostWindow();
@@ -934,9 +949,10 @@
             const observer = new ResizeObserver(reportHeight);
             if (document.body) observer.observe(document.body);
             else document.addEventListener('DOMContentLoaded', () => observer.observe(document.body), { once: true });
+          } else {
+            const mutationObserver = new MutationObserver(reportHeight);
+            mutationObserver.observe(document.documentElement, { childList: true, subtree: true });
           }
-          const mutationObserver = new MutationObserver(reportHeight);
-          mutationObserver.observe(document.documentElement, { attributes: true, childList: true, subtree: true });
           [0, 120, 350, 900].forEach((delay) => setTimeout(reportHeight, delay));
         })();
       <\/script>`;
@@ -957,7 +973,8 @@
       const frame = frames.find((item) => item.dataset.previewFrameId === String(data.frameId));
       if (!frame || event.source !== frame.contentWindow) return;
       const height = Math.max(120, Math.min(6000, Number(data.height) || 0));
-      frame.style.height = `${height}px`;
+      const nextHeight = `${height}px`;
+      if (frame.style.height !== nextHeight) frame.style.height = nextHeight;
     };
     host.addEventListener('message', previewFrameMessageHandler);
   }
@@ -2251,7 +2268,9 @@
   }
 
   function bindFloatingButtonDrag(button, action) {
-    if (!button || button.dataset.thBranchFloatingDragBound === 'true') return;
+    if (!button) return;
+    if (floatingButtonDragTarget === button && typeof floatingButtonDragCleanup === 'function') return;
+    clearFloatingButtonDrag();
     button.dataset.thBranchFloatingDragBound = 'true';
     let active = false;
     let pointerId = null;
@@ -2261,6 +2280,14 @@
     let startLeft = 0;
     let startTop = 0;
     let suppressClickUntil = 0;
+    const removers = [];
+    let mouseMoveHandler = null;
+    let mouseUpHandler = null;
+
+    const listen = (target, eventName, handler, options) => {
+      target.addEventListener(eventName, handler, options);
+      removers.push(() => target.removeEventListener(eventName, handler, options));
+    };
 
     const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
     const viewportSize = () => {
@@ -2314,7 +2341,7 @@
 
     const doc = getHostDocument();
     if (getHostWindow().PointerEvent) {
-      button.addEventListener('pointerdown', (event) => {
+      const onPointerDown = (event) => {
         if (event.button !== undefined && event.button !== 0) return;
         begin(event.clientX, event.clientY, event.pointerId);
         if (event.cancelable) event.preventDefault();
@@ -2323,56 +2350,97 @@
         } catch (error) {
           // Pointer capture is optional here.
         }
-      });
-      doc.addEventListener('pointermove', (event) => {
+      };
+      const onPointerMove = (event) => {
         if (!active || (pointerId !== null && event.pointerId !== pointerId)) return;
         move(event.clientX, event.clientY);
         if (event.cancelable) event.preventDefault();
-      }, { passive: false });
-      doc.addEventListener('pointerup', (event) => {
+      };
+      const onPointerUp = (event) => {
         if (!active || (pointerId !== null && event.pointerId !== pointerId)) return;
         finish(event);
-      }, { passive: false });
-      doc.addEventListener('pointercancel', (event) => {
+        try {
+          button.releasePointerCapture(event.pointerId);
+        } catch (error) {
+          // Ignore release failures after pointer cancellation.
+        }
+      };
+      const onPointerCancel = (event) => {
         if (!active || (pointerId !== null && event.pointerId !== pointerId)) return;
         active = false;
         pointerId = null;
         button.style.cursor = 'grab';
-      }, { passive: true });
+      };
+      listen(button, 'pointerdown', onPointerDown);
+      listen(button, 'pointermove', onPointerMove, { passive: false });
+      listen(button, 'pointerup', onPointerUp, { passive: false });
+      listen(button, 'pointercancel', onPointerCancel, { passive: true });
     } else {
-      button.addEventListener('touchstart', (event) => {
+      const onTouchStart = (event) => {
         const touch = event.changedTouches && event.changedTouches[0];
         if (!touch) return;
         begin(touch.clientX, touch.clientY, touch.identifier);
         if (event.cancelable) event.preventDefault();
-      }, { passive: false });
-      doc.addEventListener('touchmove', (event) => {
+      };
+      const onTouchMove = (event) => {
         if (!active) return;
         const touches = Array.from(event.changedTouches || []);
         const touch = touches.find((item) => item.identifier === pointerId) || touches[0];
         if (!touch) return;
         move(touch.clientX, touch.clientY);
         if (event.cancelable) event.preventDefault();
-      }, { passive: false });
-      doc.addEventListener('touchend', (event) => {
+      };
+      const onTouchEnd = (event) => {
         if (!active) return;
         finish(event);
-      }, { passive: false });
-      doc.addEventListener('touchcancel', () => {
+      };
+      const onTouchCancel = () => {
         active = false;
         pointerId = null;
         button.style.cursor = 'grab';
-      }, { passive: true });
+      };
+      const onMouseDown = (event) => {
+        if (event.button !== 0 || active) return;
+        begin(event.clientX, event.clientY, null);
+        mouseMoveHandler = (moveEvent) => move(moveEvent.clientX, moveEvent.clientY);
+        mouseUpHandler = (upEvent) => {
+          finish(upEvent);
+          if (mouseMoveHandler) doc.removeEventListener('mousemove', mouseMoveHandler);
+          if (mouseUpHandler) doc.removeEventListener('mouseup', mouseUpHandler);
+          mouseMoveHandler = null;
+          mouseUpHandler = null;
+        };
+        doc.addEventListener('mousemove', mouseMoveHandler);
+        doc.addEventListener('mouseup', mouseUpHandler);
+      };
+      listen(button, 'touchstart', onTouchStart, { passive: false });
+      listen(button, 'touchmove', onTouchMove, { passive: false });
+      listen(button, 'touchend', onTouchEnd, { passive: false });
+      listen(button, 'touchcancel', onTouchCancel, { passive: true });
+      listen(button, 'mousedown', onMouseDown);
     }
 
-    button.addEventListener('click', (event) => {
+    const onClick = (event) => {
       if (Date.now() < suppressClickUntil) {
         event.preventDefault();
         event.stopPropagation();
         return;
       }
       if (!getHostWindow().PointerEvent) action(event);
-    });
+    };
+    listen(button, 'click', onClick);
+
+    floatingButtonDragTarget = button;
+    floatingButtonDragCleanup = () => {
+      active = false;
+      pointerId = null;
+      removers.splice(0).forEach((remove) => remove());
+      if (mouseMoveHandler) doc.removeEventListener('mousemove', mouseMoveHandler);
+      if (mouseUpHandler) doc.removeEventListener('mouseup', mouseUpHandler);
+      mouseMoveHandler = null;
+      mouseUpHandler = null;
+      delete button.dataset.thBranchFloatingDragBound;
+    };
   }
 
   function minimizePanel($panel) {
@@ -2497,6 +2565,7 @@
   }
 
   function returnToList($panel) {
+    $panel.removeData('renderCache');
     setMode($panel, 'reader');
     setMobileView($panel, 'list');
     const preview = $panel.find('[data-preview]')[0];
@@ -2530,8 +2599,14 @@
     }
   }
 
-  function renderPreview($panel, raw, title) {
-    const result = renderRawResult(raw);
+  function renderPreview($panel, raw, title, force = false) {
+    const cached = $panel.data('renderCache');
+    const result = !force && cached && cached.raw === raw
+      ? cached.result
+      : renderRawResult(raw);
+    if (!cached || cached.raw !== raw || cached.result !== result) {
+      $panel.data('renderCache', { raw, result });
+    }
     const safeTitle = title || String($panel.find('[data-field="title"]').val() || '').trim() || '未命名暂存';
     $panel.find('[data-mobile-heading]').text(safeTitle);
     const warningHtml = result.warnings.length
@@ -2722,6 +2797,7 @@
   }
 
   function startNewEntry($panel) {
+    $panel.removeData('renderCache');
     $panel.removeData('selectedUid');
     $panel.attr('data-has-selection', 'false');
     $panel.find('.th-branch-item').attr('aria-current', 'false');
@@ -2852,7 +2928,7 @@
         setStatus($panel, '请先粘贴原始页面');
         return;
       }
-      renderPreview($panel, raw);
+      renderPreview($panel, raw, '', true);
       setMode($panel, 'reader');
       setStatus($panel, '已预览');
     });
@@ -3026,9 +3102,15 @@
       const Observer = getHostWindow().MutationObserver || window.MutationObserver;
       if (!Observer || !doc.body) return;
       const observer = new Observer(() => {
-        scheduleLightRepair();
+        const widget = doc.getElementById(WIDGET_ID);
+        if (widget) observer.observe(widget, { childList: true });
+        const activeOverlay = hasActiveOverlay(widget);
+        const button = doc.getElementById(FLOATING_BUTTON_ID);
+        if (!widget || (!activeOverlay && !button)) scheduleLightRepair();
       });
-      observer.observe(doc.body, { childList: true, subtree: true });
+      observer.observe(doc.body, { childList: true });
+      const widget = doc.getElementById(WIDGET_ID);
+      if (widget) observer.observe(widget, { childList: true });
       floatingGuardObserver = observer;
     } catch (error) {
       console.warn(`[${SCRIPT_NAME}] 悬浮入口守护启动失败`, error);
