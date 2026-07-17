@@ -1,14 +1,14 @@
 // == TavernHelper Script ==
 // name: 分支页面暂存器
 // author: Codex
-// version: v0.46
+// version: v0.47
 // description: 将未读分支页面原文保存到指定世界书的关闭条目中，并在酒馆助手面板内按当前酒馆渲染规则预览。
 
 (function () {
   'use strict';
 
   const SCRIPT_NAME = '分支页面暂存器';
-  const SCRIPT_VERSION = 'v0.46';
+  const SCRIPT_VERSION = 'v0.47';
   const BUTTON_NAME = '分支暂存';
   const GLOBAL_INSTANCE_KEY = '__th_branch_page_stash_instance_v1__';
   const INSTANCE_ID = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
@@ -42,6 +42,7 @@
     worldbookName: '分支页面暂存库',
     lastSelectedUid: null,
     theme: 'dark',
+    floatingButtonHidden: false,
   };
 
   function getHostWindow() {
@@ -1153,6 +1154,8 @@
       }
       .th-branch-theme-switch {
         display: flex;
+        flex-wrap: wrap;
+        align-items: center;
         gap: 5px;
         margin-top: 7px;
       }
@@ -1207,6 +1210,26 @@
         border-color: var(--th-branch-accent);
         background: var(--th-branch-accent-bg);
         color: #ffffff;
+      }
+      .th-branch-float-toggle {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 5px;
+        min-height: 24px;
+        padding: 0 8px;
+        border: 1px solid var(--th-branch-border);
+        border-radius: 6px;
+        background: var(--th-branch-button-bg);
+        color: var(--th-branch-muted);
+        font: inherit;
+        font-size: 12px;
+        font-weight: 700;
+        cursor: pointer;
+      }
+      .th-branch-float-toggle[aria-pressed="true"] {
+        border-color: var(--th-branch-accent);
+        color: var(--th-branch-text);
       }
       .th-branch-icon {
         width: 30px;
@@ -1686,6 +1709,7 @@
           font-size: 18px;
         }
         .th-branch-theme-btn,
+        .th-branch-float-toggle,
         .th-branch-btn,
         .th-branch-read-toggle,
         .th-branch-delete-toggle {
@@ -1893,6 +1917,7 @@
   function buildPanelHtml(settings) {
     const worldbooks = getWorldbookNamesSafe();
     const theme = normalizeTheme(settings.theme);
+    const floatingButtonHidden = Boolean(settings.floatingButtonHidden);
     const options = worldbooks.map((name) => `<option value="${escapeAttr(name)}"${name === settings.worldbookName ? ' selected' : ''}>${escapeHtml(name)}</option>`).join('');
     const versionLabel = getVersionLabel();
     const versionDetail = getVersionDetail();
@@ -1903,10 +1928,11 @@
             <div>
               <div class="th-branch-title">分支页面暂存器 <span class="th-branch-version">${escapeHtml(versionLabel)}</span></div>
               <div class="th-branch-update-line">${escapeHtml(versionDetail)}</div>
-              <div class="th-branch-theme-switch" aria-label="主题">
+              <div class="th-branch-theme-switch" aria-label="外观设置">
                 <button type="button" class="th-branch-theme-btn" data-action="theme" data-theme-value="dark" aria-pressed="${theme === 'dark' ? 'true' : 'false'}">黑</button>
                 <button type="button" class="th-branch-theme-btn" data-action="theme" data-theme-value="light" aria-pressed="${theme === 'light' ? 'true' : 'false'}">白</button>
                 <button type="button" class="th-branch-theme-btn" data-action="theme" data-theme-value="green" aria-pressed="${theme === 'green' ? 'true' : 'false'}">绿</button>
+                <button type="button" class="th-branch-float-toggle" data-action="toggle-floating-button" aria-pressed="${floatingButtonHidden ? 'true' : 'false'}" title="${floatingButtonHidden ? '恢复猫猫浮窗' : '隐藏猫猫浮窗'}"><i class="fa-solid ${floatingButtonHidden ? 'fa-eye' : 'fa-eye-slash'}" aria-hidden="true"></i><span>${floatingButtonHidden ? '显示浮窗' : '隐藏浮窗'}</span></button>
               </div>
             </div>
             <div class="th-branch-window-actions">
@@ -2072,6 +2098,10 @@
   }
 
   function showFloatingButton() {
+    if (loadSettings().floatingButtonHidden) {
+      hideFloatingButton();
+      return;
+    }
     let button = getHostDocument().getElementById(FLOATING_BUTTON_ID);
     if (!button) {
       injectFallbackButton();
@@ -2091,6 +2121,30 @@
   function hideFloatingButton() {
     const button = getHostDocument().getElementById(FLOATING_BUTTON_ID);
     if (button) button.style.display = 'none';
+  }
+
+  function syncFloatingButtonToggle($panel, hidden) {
+    if (!$panel || !$panel.length) return;
+    const isHidden = Boolean(hidden);
+    $panel.find('[data-action="toggle-floating-button"]')
+      .attr('aria-pressed', isHidden ? 'true' : 'false')
+      .attr('title', isHidden ? '恢复猫猫浮窗' : '隐藏猫猫浮窗')
+      .html(`<i class="fa-solid ${isHidden ? 'fa-eye' : 'fa-eye-slash'}" aria-hidden="true"></i><span>${isHidden ? '显示浮窗' : '隐藏浮窗'}</span>`);
+  }
+
+  function setFloatingButtonHidden($panel, hidden) {
+    const settings = getPanelSettings($panel);
+    settings.floatingButtonHidden = Boolean(hidden);
+    saveSettings(settings);
+    syncFloatingButtonToggle($panel, settings.floatingButtonHidden);
+    if (settings.floatingButtonHidden) {
+      hideFloatingButton();
+      setStatus($panel, '猫猫浮窗已隐藏，可从酒馆助手备用按钮打开');
+      return;
+    }
+    const widget = getHostDocument().getElementById(WIDGET_ID);
+    if (!hasActiveOverlay(widget)) showFloatingButton();
+    setStatus($panel, '猫猫浮窗将在返回酒馆后显示');
   }
 
   function applyFloatingButtonPosition(button) {
@@ -2820,6 +2874,11 @@
       setPanelTheme($panel, this.dataset.themeValue);
     });
 
+    $panel.on('click', '[data-action="toggle-floating-button"]', function () {
+      const isHidden = String($(this).attr('aria-pressed')) === 'true';
+      setFloatingButtonHidden($panel, !isHidden);
+    });
+
     $panel.on('click', '[data-action="toggle-mobile-settings"]', () => {
       $panel.toggleClass('th-branch-mobile-settings-open');
     });
@@ -3006,6 +3065,8 @@
     const doc = getHostDocument();
     const widget = ensureWidgetContainer();
     const activeOverlay = syncWidgetOpenState(widget);
+    const settings = loadSettings();
+    const shouldShow = !activeOverlay && !settings.floatingButtonHidden;
     removeMinimizedButton();
     let existing = doc.getElementById(FLOATING_BUTTON_ID);
     if (existing && existing.dataset.thBranchStashVersion !== SCRIPT_VERSION) {
@@ -3022,10 +3083,10 @@
       existing.title = '打开分支页面暂存器';
       existing.setAttribute('aria-label', '打开分支页面暂存器');
       existing.dataset.thBranchStashVersion = SCRIPT_VERSION;
-      existing.style.cssText = getFloatingButtonStyle(loadSettings().theme);
+      existing.style.cssText = getFloatingButtonStyle(settings.theme);
       applyFloatingButtonPosition(existing);
-      existing.style.display = activeOverlay ? 'none' : '';
-      if (!activeOverlay) ensureFloatingButtonInViewport(existing);
+      existing.style.display = shouldShow ? '' : 'none';
+      if (shouldShow) ensureFloatingButtonInViewport(existing);
       bindFloatingButtonDrag(existing, () => openPanel().catch((error) => notify('error', error.message || String(error))));
       if (existing.parentNode !== widget) widget.appendChild(existing);
       return;
@@ -3037,12 +3098,12 @@
     button.title = '打开分支页面暂存器';
     button.setAttribute('aria-label', '打开分支页面暂存器');
     button.dataset.thBranchStashVersion = SCRIPT_VERSION;
-    button.style.cssText = getFloatingButtonStyle(loadSettings().theme);
+    button.style.cssText = getFloatingButtonStyle(settings.theme);
     applyFloatingButtonPosition(button);
-    button.style.display = activeOverlay ? 'none' : '';
+    button.style.display = shouldShow ? '' : 'none';
     bindFloatingButtonDrag(button, () => openPanel().catch((error) => notify('error', error.message || String(error))));
     widget.appendChild(button);
-    if (!activeOverlay) ensureFloatingButtonInViewport(button);
+    if (shouldShow) ensureFloatingButtonInViewport(button);
   }
 
   function installFloatingButtonGuard() {
@@ -3060,11 +3121,12 @@
         const widget = doc.getElementById(WIDGET_ID);
         const button = doc.getElementById(FLOATING_BUTTON_ID);
         const activeOverlay = syncWidgetOpenState(widget);
+        const floatingButtonHidden = Boolean(loadSettings().floatingButtonHidden);
         const buttonStale = button && button.dataset.thBranchStashVersion !== SCRIPT_VERSION;
-        const buttonHiddenWithoutPanel = button && !activeOverlay && button.style.display === 'none';
+        const buttonHiddenWithoutPanel = button && !activeOverlay && !floatingButtonHidden && button.style.display === 'none';
         let buttonInvisible = false;
         let buttonOutside = false;
-        if (deep && button && !activeOverlay) {
+        if (deep && button && !activeOverlay && !floatingButtonHidden) {
           const style = getHostWindow().getComputedStyle ? getHostWindow().getComputedStyle(button) : null;
           buttonInvisible = !!style && (style.display === 'none' || style.visibility === 'hidden' || Number(style.opacity) === 0);
           const rect = button.getBoundingClientRect();
